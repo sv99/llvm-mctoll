@@ -1,8 +1,8 @@
-// REQUIRES: x86_64-linux
-// RUN: clang -O0 -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
-// RUN: clang -o %t-dis %t-dis.ll
-// RUN: %t-dis 2>&1 | FileCheck %s
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -O0 -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t-dis %t-dis.ll
+// RUN: %run-elf %t-dis 2>&1 | FileCheck %s
 // CHECK: 42.5
 // CHECK: 42.5
 // CHECK-EMPTY
@@ -74,14 +74,14 @@ main:                                   # @main
     xor rax, rax
     ret
 
-.type   .L.str,@object                  # @.str
-.section        .rodata.str1.1,"aMS",@progbits,1
+.section     .rodata
+    .type   .L.str,@object                  # @.str
 .L.str:
     .asciz  "%.1f\n"
     .size   .L.str, 6
 
-.section    .rodata.cst8,"aM",@progbits,8
 .LCPI2_0:
     .long   0x0000000000000000              # double 0.0
 .LCPI2_1:
     .quad   0x4045400000000000              # double 42.5
+

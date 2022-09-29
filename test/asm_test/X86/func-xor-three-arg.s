@@ -1,8 +1,8 @@
-// REQUIRES: x86_64-linux
-// RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
-// RUN: clang -o %t-dis %t-dis.ll
-// RUN: %t-dis 2>&1 | FileCheck %s
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t-dis %t-dis.ll
+// RUN: %run-elf %t-dis 2>&1 | FileCheck %s
 // CHECK: ret val: 6
 
 // Test for correct discovery of arguments of call_me in the presence of

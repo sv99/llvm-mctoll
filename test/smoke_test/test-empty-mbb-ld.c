@@ -10,19 +10,8 @@
 // CHECK-LD: Array[12]: 3
 // CHECK-EMPTY
 
-// Test code generated using lld linker
-// RUN: clang -o %t-lld-opt %s -O2 -mno-sse -fuse-ld=lld
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t-lld-opt
-// RUN: clang -o %t-lld-opt-dis %t-lld-opt-dis.ll
-// RUN: %t-lld-opt-dis 2>&1 | FileCheck %s -check-prefix=CHECK-LLD
-// CHECK-LLD: Array[0]: 3
-// CHECK-LLD: Array[4]: 3
-// CHECK-LLD: Array[8]: 3
-// CHECK-LLD: Array[12]: 3
-// CHECK-EMPTY
-
-/* matrix_loop() will check the instructon of LEA64_32 which miss the add
- * instruction. The insturction such as $edx = LEA64_32r $r8, 1, $rsi, 0, $noreg
+/* matrix_loop() will check the instruction of LEA64_32 which miss the add
+ * instruction. The instruction such as $edx = LEA64_32r $r8, 1, $rsi, 0, $noreg
  * matrix_loop will check CMP64rr, SUB64rr and X86::COND_AE.
  */
 

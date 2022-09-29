@@ -1,3 +1,4 @@
+// REQUIRES: system-linux
 // RUN: clang %s -o %t --target=%arm_triple -fuse-ld=lld
 // RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
 // RUN: clang -o %t1 %t-dis.ll -mx32

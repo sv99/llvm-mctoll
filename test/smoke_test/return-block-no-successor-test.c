@@ -1,6 +1,6 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t-opt %s -O2 -mno-sse
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t-opt
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t-opt %s -O2 -mno-sse
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t-opt
 // RUN: clang -o %t-opt-dis %t-opt-dis.ll
 // RUN: %t-opt-dis 2>&1 | FileCheck %s
 // CHECK: foo: 26

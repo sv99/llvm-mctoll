@@ -1,5 +1,6 @@
-// RUN: clang -o %t-opt %s -O2 -mno-sse
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h -I /usr/include/time.h -I /usr/include/unistd.h %t-opt
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t-opt %s -O2 -mno-sse
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t-opt
 // RUN: clang -o %t-opt-dis %t-opt-dis.ll
 // RUN: %t-opt-dis 2>&1 | FileCheck --check-prefix=RESULT %s
 // RESULT:time_val:

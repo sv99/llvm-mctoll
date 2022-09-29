@@ -1,8 +1,8 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
-// RUN: clang -o %t1 %t-dis.ll
-// RUN: %t1 2>&1 | FileCheck %s
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t1 %t-dis.ll
+// RUN: %run-elf %t1 2>&1 | FileCheck %s
 // CHECK: 10
 // CHECK-NEXT: 20
 // CHECK-NEXT: 40

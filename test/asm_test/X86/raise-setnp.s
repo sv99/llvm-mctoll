@@ -1,6 +1,6 @@
 // REQUIRES: system-linux
 // RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
+// RUN: llvm-mctoll -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 // CHECK: -1
@@ -84,8 +84,8 @@ main:                                   # @main
 	.size	main, .Lfunc_end1-main
 	.cfi_endproc
                                         # -- End function
+	.section	.rodata
 	.type	.L.str,@object                  # @.str
-	.section	.rodata.str1.1,"aMS",@progbits,1
 .L.str:
 	.asciz	"%d\n"
 	.size	.L.str, 4

@@ -1,6 +1,7 @@
-// REQUIRES: x86_64-linux
+// REQUIRES: system-linux
+// Segmentation fault when run in the docker
 // RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
+// RUN: llvm-mctoll -d -I %S/test-inc.h %t
 // RUN: clang -o %t-dis %t-dis.ll
 // RUN: %t-dis 2>&1 | FileCheck %s
 // CHECK: Called function

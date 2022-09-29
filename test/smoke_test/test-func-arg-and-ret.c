@@ -1,6 +1,6 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t %s -O2
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s -O2
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 // CHECK: r1: 9
@@ -11,7 +11,7 @@
  * JMP_1 -39, <0x556ee5f3fd28>
  */
 
-#include<stdio.h>
+#include <stdio.h>
 
 int __attribute__((noinline)) foo2(int a , int b) {
   return a + b;

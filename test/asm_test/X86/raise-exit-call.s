@@ -1,7 +1,6 @@
-	
 // REQUIRES: system-linux
 // RUN: clang -o %t %s
-// RUN: llvm-mctoll -d --include-files="/usr/include/stdio.h,/usr/include/stdlib.h" %t
+// RUN: llvm-mctoll -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 0 2>&1 | FileCheck %s
 // CHECK: End of function: 2
@@ -59,8 +58,8 @@ var:
 	.long	0                               # 0x0
 	.size	var, 4
 
+	.section	.rodata
 	.type	.L.str,@object                  # @.str
-	.section	.rodata.str1.1,"aMS",@progbits,1
 .L.str:
 	.asciz	"End of function: %d\n"
 	.size	.L.str, 21

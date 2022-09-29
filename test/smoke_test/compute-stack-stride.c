@@ -1,5 +1,6 @@
-// RUN: clang -o %t-opt %s -O2 -mno-sse
-// RUN: llvm-mctoll -d --include-files="/usr/include/stdio.h,/usr/include/stdlib.h,/usr/include/string.h" %t-opt
+// RUN: clang %cparams -o %t-opt %s -O2 -mno-sse
+// REQUIRES: system-linux || system-darwin
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t-opt
 // RUN: clang -o %t-opt-dis %t-opt-dis.ll
 // RUN: %t-opt-dis 2>&1 | FileCheck %s
 //CHECK:arr3[1] = -127

@@ -1,6 +1,6 @@
-// REQUIRES: system-linux
-// RUN: clang -O3 -fno-inline -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -O3 -fno-inline -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 // CHECK: 4^2 = 16

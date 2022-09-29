@@ -1,6 +1,6 @@
 // REQUIRES: system-linux
 // RUN: clang -o %t %s -O3 -mno-sse
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h -I /usr/include/string.h %t
+// RUN: llvm-mctoll -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 // CHECK: red[0] = 0

@@ -1,0 +1,33 @@
+// 61:7: error: void type only allowed for function results
+//  phi void
+// RUN: clang %c-target -o %t %s
+// RUN: llvm-mctoll -d %m-target -I %S/test-inc.h %t
+// RUN: clang %c-target -o %t1 %t-dis.ll
+// RUN: %run-elf %t1 2>&1 | FileCheck %s
+
+//  clang -o %t %s -O3 -fno-inline
+//  llvm-mctoll -d -I /usr/include/stdio.h %t
+//  clang -o %t1 %t-dis.ll
+//  %t1 2>&1 | FileCheck %s
+// CHECK: x > 0
+// CHECK-EMPTY
+
+#include <stdio.h>
+
+typedef struct {
+  int x;
+} Data;
+
+void test(Data *data) {
+  if (data->x > 0) {
+    printf("x > 0\n");
+  } else {
+    printf("x <= 0\n");
+  }
+}
+
+int main() {
+  Data data;
+  data.x = 1 << 16;
+  test(&data);
+}

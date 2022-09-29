@@ -1,3 +1,4 @@
+// REQUIRES: system-linux
 // RUN: clang %S/../Inputs/globalvar.c -o %t.so --target=%arm_triple -fuse-ld=lld -shared -fPIC
 // RUN: llvm-mctoll -d %t.so
 // RUN: clang -o %t1 %s %t-dis.ll -mx32

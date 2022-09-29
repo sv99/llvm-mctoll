@@ -1,14 +1,8 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t-clang-noopt %s 
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t-clang-noopt
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t-clang-noopt %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t-clang-noopt
 // RUN: clang -o %t-clang-noopt-dis %t-clang-noopt-dis.ll
 // RUN: %t-clang-noopt-dis 2>&1 | FileCheck %s 
-
-// RUN: gcc -o %t-gcc-noopt %s 
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t-gcc-noopt
-// RUN: clang -o %t-gcc-noopt-dis %t-gcc-noopt-dis.ll
-// RUN: %t-gcc-noopt-dis 2>&1 | FileCheck %s
-
 // CHECK: 20  + 5 = 25
 // CHECK-NEXT: 20  - 5 = 15
 // CHECK-NEXT: 20  * 5 = 100

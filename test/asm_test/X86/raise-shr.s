@@ -1,15 +1,13 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
-// RUN: clang -o %t1 %t-dis.ll
-// RUN: %t1 2>&1 | FileCheck %s
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t1 %t-dis.ll
+// RUN: %run-elf %t1 2>&1 | FileCheck %s
 // CHECK: 2
 // CHECK-NEXT: 4
 // CHECK-NEXT: 6
 // CHECK-NEXT: 12
 // CHECK-EMPTY:
-
-
 
 	.text
 	.file	"raise-shr.s"

@@ -1,8 +1,8 @@
-// REQUIRES: x86_64-linux
-// RUN: clang -o %t %s
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
-// RUN: clang -o %t-dis %t-dis.ll
-// RUN: %t-dis 2>&1 | FileCheck %s
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t-dis %t-dis.ll
+// RUN: %run-elf %t-dis 2>&1 | FileCheck %s
 // CHECK: 0xffffffffffffffff
 // CHECK-NEXT: 0x0000000000000000
 // CHECK-NEXT: 0xffffffffffffffff
@@ -99,14 +99,12 @@ main:                                   # @main
 
 .type   .L.str,@object                  # @.str
 .section        .rodata.str1.1,"aMS",@progbits,1
-.L.str:
-    .asciz  "0x%016llx\n"
-    .size   .L.str, 11
-
-.section    .rodata.cst8,"aM",@progbits,8
 .L.val:
     .quad 0x3ff8000000000000 # double 1.5
 .L.val.1:
     .quad 0x0000000000000000 # double 0.0
 .L.val.2:
     .float 1.5
+.L.str:
+    .asciz  "0x%016llx\n"
+    .size   .L.str, 11

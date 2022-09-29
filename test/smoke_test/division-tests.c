@@ -1,9 +1,6 @@
-#include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-// REQUIRES: system-linux
-// RUN: clang -o %t %s -O2
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h %t
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s -O2
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 
@@ -22,6 +19,10 @@
 // CHECK: q = 0xffffe079 r = 0xfffff8f1
 // CHECK: q = 0x7d5dfff r = 0x1ff82a2001
 // CHECK: q = 0xffffffffffd5e001 r = 0xffffffe0002a1fff
+
+#include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
 
 void __attribute__((noinline)) div8_test(uint8_t dd,
 					 uint8_t dv) {

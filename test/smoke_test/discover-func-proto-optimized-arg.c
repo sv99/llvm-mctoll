@@ -1,11 +1,12 @@
-// REQUIRES: system-linux
-// RUN: clang -o %t %s -O2
-// RUN: llvm-mctoll -d -I /usr/include/stdio.h -I /usr/include/stdlib.h %t
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s -O2
+// RUN: llvm-mctoll %mparams -d -I %S/test-inc.h %t
 // RUN: clang -o %t1 %t-dis.ll
 // RUN: %t1 2>&1 | FileCheck %s
 // CHECK: ret : -1
 // CHECK: a : 0x7ffcd1e b : 0x7fffab0f c : 0x7fffef2d N : 1024
 // CHECK-EMPTY:
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
