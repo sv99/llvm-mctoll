@@ -7,9 +7,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ModuleRaiser.h"
 #include "MachineFunctionRaiser.h"
 #include "MachineInstructionRaiser.h"
+#include "ModuleRaiser.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/MC/MCInstPrinter.h"
@@ -716,6 +716,19 @@ void ModuleRaiser::load(uint64_t StartAddress, uint64_t StopAddress,
       if (isAFunctionSymbol(Obj, Symbols[SI])) {
         auto &SymStr = Symbols[SI].Name;
 
+        // New function symbol encountered. Record all targets collected to
+        // current MachineFunctionRaiser before we start parsing the new
+        // function bytes.
+        if (CurMFRaiser) {
+          assert(CurMFRaiser != nullptr &&
+                 "Encountered uninitialized MachineFunction raiser object");
+          CurMFRaiser->getMCInstRaiser()->addTargets(&BranchTargetSet);
+        }
+        // Clear the set used to record all branch targets of this function.
+        BranchTargetSet.clear();
+        // Started new function context.
+        CurMFRaiser = nullptr;
+
         // Check the symbol name by the function filter.
         if (!FFT->checkFunctionFilter(SymStr, Start))
           continue;
@@ -746,28 +759,15 @@ void ModuleRaiser::load(uint64_t StartAddress, uint64_t StopAddress,
         Function *Func = Function::Create(FTy, GlobalValue::ExternalLinkage,
                                           FunctionName, M);
 
-        // New function symbol encountered. Record all targets collected to
-        // current MachineFunctionRaiser before we start parsing the new
-        // function bytes.
-        CurMFRaiser = getCurrentMachineFunctionRaiser();
-        for (auto TargetIdx : BranchTargetSet) {
-          assert(CurMFRaiser != nullptr &&
-                 "Encountered uninitialized MachineFunction raiser object");
-          CurMFRaiser->getMCInstRaiser()->addTarget(TargetIdx);
-        }
-
-        // Clear the set used to record all branch targets of this function.
-        BranchTargetSet.clear();
         // Create a new MachineFunction raiser
         CurMFRaiser =
             CreateAndAddMachineFunctionRaiser(Func, this, Start, End);
-        LLVM_DEBUG(dbgs() << "\nFunction " << Symbols[SI].Name << ":\n");
+        LLVM_DEBUG(dbgs() << "Function " << Symbols[SI].Name << " "
+                          << format_hex(Start, 8) << " - "
+                          << format_hex(End, 8) << "\n");
       } else {
         // Continue using to the most recent MachineFunctionRaiser
         // Get current MachineFunctionRaiser
-        CurMFRaiser = getCurrentMachineFunctionRaiser();
-        // assert(curMFRaiser != nullptr && "Current Machine Function Raiser not
-        // initialized");
         if (CurMFRaiser == nullptr) {
           // At this point in the instruction stream, we do not have a function
           // symbol to which the bytes being parsed can be made part of. So skip
@@ -968,13 +968,13 @@ void ModuleRaiser::load(uint64_t StartAddress, uint64_t StopAddress,
       FFT->eraseFunctionBySymbol(Symbols[SI].Name,
                                  FunctionFilter::FILTER_INCLUDE);
     }
+    // Record all targets of the last function parsed
+    // CurMFRaiser = getCurrentMachineFunctionRaiser();
+    if (CurMFRaiser) {
+      CurMFRaiser->getMCInstRaiser()->addTargets(&BranchTargetSet);
+    }
     LLVM_DEBUG(dbgs() << "END Disassembly of Functions in Section : "
                       << SectionName.data() << "\n");
-
-    // Record all targets of the last function parsed
-    CurMFRaiser = getCurrentMachineFunctionRaiser();
-    for (auto TargetIdx : BranchTargetSet)
-      CurMFRaiser->getMCInstRaiser()->addTarget(TargetIdx);
 
     runMachineFunctionPasses();
 

@@ -123,6 +123,9 @@ void MCInstRaiser::buildCFG(MachineFunction &MF, const MCInstrAnalysis *MIA,
     std::vector<uint64_t> TermMCInstTargets;
     auto MCIDMapIter = InstMap.rbegin();
     if (MCIDMapIter != InstMap.rend()) {
+      // Skip last data if exists
+      while (MCIDMapIter->second.isData())
+        MCIDMapIter++;
       uint64_t TermMCInstIndex = MCIDMapIter->first;
       auto TermMCInst = MCIDMapIter->second.getMCInst();
       // The following code handles a situation where the text section ends with

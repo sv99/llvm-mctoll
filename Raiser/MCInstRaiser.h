@@ -36,6 +36,13 @@ public:
     TargetIndices.insert(TargetIndex);
   }
 
+  void addTargets(std::set<uint64_t> *Targets) {
+    // Add targets
+    for (auto TargetIdx : *Targets) {
+      addTarget(TargetIdx);
+    }
+  }
+
   void addMCInstOrData(uint64_t Index, MCInstOrData MCInst);
 
   void buildCFG(MachineFunction &MF, const MCInstrAnalysis *MIA,
