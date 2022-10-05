@@ -6,15 +6,16 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMInstructionSplitting class
-// for use by llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMInstructionSplitting.h"
 #include "ARMBaseInstrInfo.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "MCTargetDesc/ARMAddressingModes.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 
 #define DEBUG_TYPE "mctoll"
@@ -22,23 +23,8 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMInstructionSplitting::ID = 0;
-
-ARMInstructionSplitting::ARMInstructionSplitting(ARMModuleRaiser &CurrMR,
-                                                 MachineFunction *CurrMF,
-                                                 Function *CurrRF)
-    : ARMRaiserBase(ID, CurrMR) {
-  MF = CurrMF;
-  RF = CurrRF;
-  TII = MF->getSubtarget<ARMSubtarget>().getInstrInfo();
-  MRI = &MF->getRegInfo();
-  CTX = &getModule()->getContext();
-}
-
-ARMInstructionSplitting::~ARMInstructionSplitting() {}
-
 /// Check if the MI has shift pattern.
-unsigned ARMInstructionSplitting::checkisShifter(unsigned Opcode) {
+unsigned ARMMachineInstructionRaiser::checkIsShifter(unsigned Opcode) {
   switch (Opcode) {
   case ARM::MOVsr:
   case ARM::MOVsi:
@@ -88,7 +74,7 @@ unsigned ARMInstructionSplitting::checkisShifter(unsigned Opcode) {
 }
 
 /// If the MI is load/store which needs wback, it will return true.
-bool ARMInstructionSplitting::isLDRSTRPre(unsigned Opcode) {
+bool ARMMachineInstructionRaiser::isLDRSTRPre(unsigned Opcode) {
   switch (Opcode) {
   case ARM::LDR_PRE_REG:
   case ARM::LDR_PRE_IMM:
@@ -105,7 +91,7 @@ bool ARMInstructionSplitting::isLDRSTRPre(unsigned Opcode) {
 }
 
 /// No matter what pattern of Load/Store is, change the Opcode to xxxi12.
-unsigned ARMInstructionSplitting::getLoadStoreOpcode(unsigned Opcode) {
+unsigned ARMMachineInstructionRaiser::getLoadStoreOpcode(unsigned Opcode) {
   switch (Opcode) {
   case ARM::LDRrs:
   case ARM::LDRi12:
@@ -133,7 +119,7 @@ unsigned ARMInstructionSplitting::getLoadStoreOpcode(unsigned Opcode) {
 }
 
 /// True if the ARM instruction performs Shift_C().
-bool ARMInstructionSplitting::isShift_C(unsigned Opcode) {
+bool ARMMachineInstructionRaiser::isShift_C(unsigned Opcode) {
   switch (Opcode) {
   case ARM::ANDrsr:
   case ARM::ANDrsi:
@@ -155,8 +141,119 @@ bool ARMInstructionSplitting::isShift_C(unsigned Opcode) {
   }
 }
 
+MachineInstr* ARMMachineInstructionRaiser::splitLDRSTR(MachineBasicBlock &MBB, MachineInstr &MI) {
+
+  auto *TII = TargetInfo.getInstrInfo();
+  unsigned Simm = MI.getOperand(3).getImm();
+  unsigned SOffSet = ARM_AM::getAM2Offset(Simm);
+  ARM_AM::ShiftOpc SOpc = ARM_AM::getAM2ShiftOpc(Simm);
+  Register SVReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
+  Register AVReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
+  MachineOperand &Rd = MI.getOperand(0);
+  MachineOperand &Rn = MI.getOperand(1);
+  MachineOperand &Rm = MI.getOperand(2);
+  unsigned ShiftOpc = getShiftOpcode(SOpc, SOffSet);
+  // Get Metadata for the fisrt insturction.
+  ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
+      ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+  MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
+  // Get Metadata for the second insturction.
+  ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
+      ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+  MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
+  // Get Metadata for the third insturction.
+  ConstantAsMetadata *CMD_thd = ConstantAsMetadata::get(
+      ConstantInt::get(Ctx, llvm::APInt(64, 2, false)));
+  MDNode *N_thd = MDNode::get(Ctx, CMD_thd);
+  unsigned NewOpc = getLoadStoreOpcode(MI.getOpcode());
+  int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
+  if (SOffSet > 0) {
+    // Split LDRxxx/STRxxx Rd, [Rn, Rm, shift]
+    MachineInstrBuilder Fst = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(ShiftOpc), SVReg);
+    addOperand(Fst, Rm);
+    Fst.addImm(SOffSet);
+    MachineInstrBuilder Sec = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(ARM::ADDrr), AVReg);
+    addOperand(Sec, Rn);
+    Sec.addReg(SVReg);
+    MachineInstrBuilder Thd = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(NewOpc));
+    if (MI.mayStore())
+      addOperand(Thd, Rd);
+    else
+      addOperand(Thd, Rd, true);
+
+    Thd.addReg(AVReg);
+    // Add CPSR if the MI has.
+    if (Idx != -1) {
+      Fst.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Fst, MI.getOperand(Idx));
+      Sec.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Sec, MI.getOperand(Idx));
+      Thd.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Thd, MI.getOperand(Idx));
+    }
+    Fst.addMetadata(MDNFir);
+    Sec.addMetadata(MDNSec);
+    Thd.addMetadata(N_thd);
+  } else if (ShiftOpc == ARM::RRX) {
+    // Split LDRxxx/STRxxx Rd, [Rn, Rm, rrx]
+    MachineInstrBuilder Fst = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(ShiftOpc), SVReg);
+    addOperand(Fst, Rm);
+    MachineInstrBuilder Sec = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(ARM::ADDrr), AVReg);
+    addOperand(Sec, Rn);
+    Sec.addReg(SVReg);
+    MachineInstrBuilder Thd = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(NewOpc));
+    if (MI.mayStore())
+      addOperand(Thd, Rd);
+    else
+      addOperand(Thd, Rd, true);
+
+    Thd.addReg(AVReg);
+    // Add CPSR if the MI has.
+    if (Idx != -1) {
+      Sec.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Sec, MI.getOperand(Idx));
+      Thd.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Thd, MI.getOperand(Idx));
+    }
+    Fst.addMetadata(MDNFir);
+    Sec.addMetadata(MDNSec);
+    Thd.addMetadata(N_thd);
+  } else {
+    // Split LDRxxx/STRxxx Rd, [Rn, Rm]
+    MachineInstrBuilder Fst = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(ARM::ADDrr), AVReg);
+    addOperand(Fst, Rn);
+    addOperand(Fst, Rm);
+    MachineInstrBuilder Sec = BuildMI(MBB, MI, MI.getDebugLoc(),
+                                      TII->get(NewOpc));
+    if (MI.mayStore())
+      addOperand(Sec, Rd);
+    else
+      addOperand(Sec, Rd, true);
+
+    Sec.addReg(AVReg);
+    // Add CPSR if the MI has.
+    if (Idx != -1) {
+      Fst.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Fst, MI.getOperand(Idx));
+      Sec.addImm(MI.getOperand(Idx - 1).getImm());
+      addOperand(Sec, MI.getOperand(Idx));
+    }
+    Fst.addMetadata(MDNFir);
+    Sec.addMetadata(MDNSec);
+  }
+
+  return &MI;
+}
+
 /// Get the shift opcode in MI.
-unsigned ARMInstructionSplitting::getShiftOpcode(ARM_AM::ShiftOpc SOpc,
+unsigned ARMMachineInstructionRaiser::getShiftOpcode(ARM_AM::ShiftOpc SOpc,
                                                  unsigned OffSet) {
   unsigned RetVal = 0;
 
@@ -184,7 +281,7 @@ unsigned ARMInstructionSplitting::getShiftOpcode(ARM_AM::ShiftOpc SOpc,
 }
 
 MachineInstrBuilder &
-ARMInstructionSplitting::addOperand(MachineInstrBuilder &MIB,
+ARMMachineInstructionRaiser::addOperand(MachineInstrBuilder &MIB,
                                     MachineOperand &MO, bool IsDef) {
   switch (MO.getType()) {
   default:
@@ -207,8 +304,9 @@ ARMInstructionSplitting::addOperand(MachineInstrBuilder &MIB,
 /// Split LDRxxx/STRxxx<c><q> <Rt>, [<Rn>, #+/-<imm>]! to:
 /// ADD Rn, Rn, #imm
 /// LDRxxx/STRxxx Rt, [Rn]
-MachineInstr *ARMInstructionSplitting::splitLDRSTRPreImm(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitLDRSTRPreImm(MachineBasicBlock &MBB,
                                                          MachineInstr &MI) {
+  auto *TII = TargetInfo.getInstrInfo();
   MachineOperand &Rd = MI.getOperand(0);
   MachineOperand &Rn = MI.getOperand(1);
   MachineOperand &Rm = MI.getOperand(2);
@@ -217,13 +315,13 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRPreImm(MachineBasicBlock &MBB,
   // MI is splitted into 2 instructions.
   // So get Metadata for the first instruction.
   ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-  MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+      ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+  MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
   // Get Metadata for the second instruction.
   ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-  MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+      ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+  MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
   unsigned NewOpc = getLoadStoreOpcode(MI.getOpcode());
   // Add Rm,[Rm, #imm]!
@@ -260,12 +358,13 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRPreImm(MachineBasicBlock &MBB,
 /// Rm shift #imm, but write result to VReg.
 /// Add Rn, Rm
 /// LDRxxx/STRxxx Rt, [Rn]
-MachineInstr *ARMInstructionSplitting::splitLDRSTRPre(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitLDRSTRPre(MachineBasicBlock &MBB,
                                                       MachineInstr &MI) {
+  auto *TII = TargetInfo.getInstrInfo();
   unsigned Simm = MI.getOperand(4).getImm();
   unsigned SOffSet = ARM_AM::getAM2Offset(Simm);
   ARM_AM::ShiftOpc SOpc = ARM_AM::getAM2ShiftOpc(Simm);
-  Register SVReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+  Register SVReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
 
   MachineOperand &Rd = MI.getOperand(0);
   MachineOperand &Rn = MI.getOperand(1);
@@ -275,18 +374,18 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRPre(MachineBasicBlock &MBB,
 
   // Get Metadata for the first instruction.
   ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-  MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+      ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+  MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
   // Get Metadata for the second instruction.
   ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-  MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+      ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+  MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
   // Get Metadata for the third instruction.
   ConstantAsMetadata *CMDThd = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 2, false)));
-  MDNode *MDNThd = MDNode::get(*CTX, CMDThd);
+      ConstantInt::get(Ctx, llvm::APInt(64, 2, false)));
+  MDNode *MDNThd = MDNode::get(Ctx, CMDThd);
 
   unsigned NewOpc = getLoadStoreOpcode(MI.getOpcode());
   int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
@@ -390,9 +489,10 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRPre(MachineBasicBlock &MBB,
 /// Split LDRxxx/STRxxx<c><q> <Rd>, [<Rn>, +/-<#imm>] to:
 /// Add VReg, Rn, #imm
 /// LDRxxx/STRxxx Rd, [VReg]
-MachineInstr *ARMInstructionSplitting::splitLDRSTRImm(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitLDRSTRImm(MachineBasicBlock &MBB,
                                                       MachineInstr &MI) {
-  Register VReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+  auto *TII = TargetInfo.getInstrInfo();
+  Register VReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
   MachineOperand &Rd = MI.getOperand(0);
   MachineOperand &Rn = MI.getOperand(1);
   MachineOperand &Rm = MI.getOperand(2);
@@ -400,13 +500,13 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRImm(MachineBasicBlock &MBB,
   // The MI is splitted into 2 instructions.
   // Get Metadata for the first instruction.
   ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-  MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+      ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+  MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
   // Get Metadata for the first instruction.
   ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-      ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-  MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+      ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+  MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
   unsigned NewOpc = getLoadStoreOpcode(MI.getOpcode());
   // Add VReg, Rn, #imm
@@ -438,9 +538,10 @@ MachineInstr *ARMInstructionSplitting::splitLDRSTRImm(MachineBasicBlock &MBB,
 }
 
 /// Split 'Opcode Rd, Rn, Rm, shift' except LDRxxx/STRxxx.
-MachineInstr *ARMInstructionSplitting::splitCommon(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitCommon(MachineBasicBlock &MBB,
                                                    MachineInstr &MI,
                                                    unsigned NewOpc) {
+  auto *TII = TargetInfo.getInstrInfo();
   MachineInstr *ResMI = nullptr;
   for (unsigned OpIdx = 0; OpIdx < MI.getNumOperands(); OpIdx++) {
     if (MI.getOperand(OpIdx).isImm()) {
@@ -449,19 +550,19 @@ MachineInstr *ARMInstructionSplitting::splitCommon(MachineBasicBlock &MBB,
       ARM_AM::ShiftOpc SOpc = ARM_AM::getSORegShOp(Simm);
       unsigned ShiftOpc = getShiftOpcode(SOpc, SOffSet);
 
-      Register VReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+      Register VReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
       if (ShiftOpc) {
         MachineOperand &Rd = MI.getOperand(0);
         MachineOperand &Rn = MI.getOperand(OpIdx - 2);
         MachineOperand &Rm = MI.getOperand(OpIdx - 1);
 
         ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-        MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+            ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+        MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
         ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-        MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+            ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+        MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
         if (SOffSet) {
           // Split Opcode Rd, Rn, Rm, shift #imm
@@ -531,9 +632,10 @@ MachineInstr *ARMInstructionSplitting::splitCommon(MachineBasicBlock &MBB,
 }
 
 /// Split 'opcode<s> Rd, Rn, Rm, shift' except LDRxxx/STRxxx.
-MachineInstr *ARMInstructionSplitting::splitS(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitS(MachineBasicBlock &MBB,
                                               MachineInstr &MI, unsigned NewOpc,
                                               int Idx) {
+  auto *TII = TargetInfo.getInstrInfo();
   MachineInstr *ResMI = nullptr;
   for (unsigned OpIdx = 0; OpIdx < MI.getNumOperands(); OpIdx++) {
     if (MI.getOperand(OpIdx).isImm()) {
@@ -541,16 +643,16 @@ MachineInstr *ARMInstructionSplitting::splitS(MachineBasicBlock &MBB,
       unsigned SOffSet = ARM_AM::getSORegOffset(Simm);
       ARM_AM::ShiftOpc SOpc = ARM_AM::getSORegShOp(Simm);
       unsigned ShiftOpc = getShiftOpcode(SOpc, SOffSet);
-      Register VReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+      Register VReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
 
       if (ShiftOpc) {
         ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-        MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+            ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+        MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
         ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-        MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+            ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+        MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
         MachineOperand &Rd = MI.getOperand(0);
         MachineOperand &Rn = MI.getOperand(OpIdx - 2);
@@ -706,9 +808,10 @@ MachineInstr *ARMInstructionSplitting::splitS(MachineBasicBlock &MBB,
 }
 
 /// Split 'opcode<c> Rd, Rn, Rm, shift' except LDRxxx/STRxxx.
-MachineInstr *ARMInstructionSplitting::splitC(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitC(MachineBasicBlock &MBB,
                                               MachineInstr &MI, unsigned NewOpc,
                                               int Idx) {
+  auto *TII = TargetInfo.getInstrInfo();
   MachineInstr *ResMI = nullptr;
   for (unsigned OpIdx = 0; OpIdx < MI.getNumOperands(); OpIdx++) {
     if (MI.getOperand(OpIdx).isImm()) {
@@ -716,7 +819,7 @@ MachineInstr *ARMInstructionSplitting::splitC(MachineBasicBlock &MBB,
       unsigned SOffSet = ARM_AM::getSORegOffset(Simm);
       ARM_AM::ShiftOpc SOpc = ARM_AM::getSORegShOp(Simm);
       unsigned ShiftOpc = getShiftOpcode(SOpc, SOffSet);
-      Register VReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+      Register VReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
 
       if (ShiftOpc) {
         MachineOperand &Rd = MI.getOperand(0);
@@ -724,12 +827,12 @@ MachineInstr *ARMInstructionSplitting::splitC(MachineBasicBlock &MBB,
         MachineOperand &Rm = MI.getOperand(OpIdx - 1);
 
         ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-        MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+            ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+        MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
         ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-        MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+            ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+        MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
         if (SOffSet) {
           // Split opcode<c> Rd, Rn, Rm, shift #imm
@@ -809,9 +912,10 @@ MachineInstr *ARMInstructionSplitting::splitC(MachineBasicBlock &MBB,
 }
 
 /// Split 'opcode<s><c> Rd, Rn, Rm, shift' except LDRxxx/STRxxx.
-MachineInstr *ARMInstructionSplitting::splitCS(MachineBasicBlock &MBB,
+MachineInstr *ARMMachineInstructionRaiser::splitCS(MachineBasicBlock &MBB,
                                                MachineInstr &MI,
                                                unsigned NewOpc, int Idx) {
+  auto *TII = TargetInfo.getInstrInfo();
   MachineInstr *ResMI = nullptr;
   for (unsigned OpIdx = 0; OpIdx < MI.getNumOperands(); OpIdx++) {
     if (MI.getOperand(OpIdx).isImm()) {
@@ -819,7 +923,7 @@ MachineInstr *ARMInstructionSplitting::splitCS(MachineBasicBlock &MBB,
       unsigned SOffSet = ARM_AM::getSORegOffset(Simm);
       ARM_AM::ShiftOpc SOpc = ARM_AM::getSORegShOp(Simm);
       unsigned ShiftOpc = getShiftOpcode(SOpc, SOffSet);
-      Register VReg = MRI->createVirtualRegister(&ARM::GPRnopcRegClass);
+      Register VReg = MachineRegInfo.createVirtualRegister(&ARM::GPRnopcRegClass);
 
       if (ShiftOpc) {
         MachineOperand &Rd = MI.getOperand(0);
@@ -827,12 +931,12 @@ MachineInstr *ARMInstructionSplitting::splitCS(MachineBasicBlock &MBB,
         MachineOperand &Rm = MI.getOperand(OpIdx - 1);
 
         ConstantAsMetadata *CMDFir = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 0, false)));
-        MDNode *MDNFir = MDNode::get(*CTX, CMDFir);
+            ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+        MDNode *MDNFir = MDNode::get(Ctx, CMDFir);
 
         ConstantAsMetadata *CMDSec = ConstantAsMetadata::get(
-            ConstantInt::get(*CTX, llvm::APInt(64, 1, false)));
-        MDNode *MDNSec = MDNode::get(*CTX, CMDSec);
+            ConstantInt::get(Ctx, llvm::APInt(64, 1, false)));
+        MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
         // C flag is affected by Shift_c() if isShift_C is true.
         if (isShift_C(MI.getOpcode())) {
@@ -996,11 +1100,11 @@ MachineInstr *ARMInstructionSplitting::splitCS(MachineBasicBlock &MBB,
   return ResMI;
 }
 
-bool ARMInstructionSplitting::split() {
+bool ARMMachineInstructionRaiser::split() {
   LLVM_DEBUG(dbgs() << "ARMInstructionSplitting start.\n");
 
   std::vector<MachineInstr *> RemoveList;
-  for (MachineBasicBlock &MBB : *MF) {
+  for (MachineBasicBlock &MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;
          ++I) {
       MachineInstr &MI = *I;
@@ -1008,7 +1112,7 @@ bool ARMInstructionSplitting::split() {
 
       unsigned Opcode, NewOpc;
       Opcode = MI.getOpcode();
-      NewOpc = checkisShifter(Opcode);
+      NewOpc = checkIsShifter(Opcode);
 
       // Need to split
       if (getLoadStoreOpcode(Opcode)) {
@@ -1076,22 +1180,11 @@ bool ARMInstructionSplitting::split() {
     MI->removeFromParent();
 
   // For debugging.
-  LLVM_DEBUG(MF->dump());
+  LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(getRaisedFunction()->dump());
   LLVM_DEBUG(dbgs() << "ARMInstructionSplitting end.\n");
 
   return true;
 }
 
-bool ARMInstructionSplitting::runOnMachineFunction(MachineFunction &MF) {
-  init();
-  return split();
-}
-
 #undef DEBUG_TYPE
-
-extern "C" FunctionPass *createARMInstructionSplitting(ARMModuleRaiser &MR,
-                                                       MachineFunction *MF,
-                                                       Function *RF) {
-  return new ARMInstructionSplitting(MR, MF, RF);
-}

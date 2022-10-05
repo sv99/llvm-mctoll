@@ -327,8 +327,8 @@ int64_t MCInstRaiser::getMCInstOffsetOfMBBNumber(uint64_t MBBNum) const {
 }
 
 uint64_t MCInstRaiser::getMCInstSize(uint64_t Offset) const {
-  const_mcinst_iter Iter = InstMap.find(Offset);
-  const_mcinst_iter End = InstMap.end();
+  const_mcinstr_iter Iter = InstMap.find(Offset);
+  const_mcinstr_iter End = InstMap.end();
   assert(Iter != End && "Attempt to find MCInst at non-existent offset");
 
   if (Iter.operator++() != End) {

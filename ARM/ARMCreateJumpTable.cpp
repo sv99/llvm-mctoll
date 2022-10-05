@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMCreateJumpTable class
-// for use by llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
 #include "ARMBaseInstrInfo.h"
-#include "ARMCreateJumpTable.h"
 #include "ARMMachineFunctionInfo.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -35,32 +35,15 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMCreateJumpTable::ID = 0;
-
-ARMCreateJumpTable::ARMCreateJumpTable(ARMModuleRaiser &CurrMR,
-                                       MachineFunction *CurrMF,
-                                       Function *CurrRF,
-                                       MCInstRaiser *CurrMCIR)
-    : ARMRaiserBase(ID, CurrMR) {
-  MF = CurrMF;
-  RF = CurrRF;
-  MCIR = CurrMCIR;
-}
-
-ARMCreateJumpTable::~ARMCreateJumpTable() {}
-
-/// Get the MachineBasicBlock to add the jumptable instruction.
-MachineBasicBlock *ARMCreateJumpTable::checkJumptableBB(MachineFunction &MF) {
+/// Get the MachineBasicBlock to add the jump table instruction.
+MachineBasicBlock *ARMMachineInstructionRaiser::checkJumpTableBB(MachineFunction &MF) {
   MachineBasicBlock *JumpTableBB = nullptr;
   for (MachineBasicBlock &MBB : MF) {
-    for (MachineBasicBlock::iterator BackMBBIter = MBB.begin();
-         BackMBBIter != MBB.end(); BackMBBIter++) {
-      MachineInstr &CurMachInstr = (*BackMBBIter);
-
+    for (MachineInstr &MI : MBB.instrs()) {
       // Find the MI: %r0 = ADDri %pc
-      if (CurMachInstr.getOpcode() == ARM::ADDri &&
-          CurMachInstr.getOperand(1).getReg() == ARM::PC) {
-        JumpTableBB = CurMachInstr.getParent();
+      if (MI.getOpcode() == ARM::ADDri &&
+          MI.getOperand(1).getReg() == ARM::PC) {
+        JumpTableBB = MI.getParent();
       }
     }
   }
@@ -70,18 +53,16 @@ MachineBasicBlock *ARMCreateJumpTable::checkJumptableBB(MachineFunction &MF) {
   std::vector<MachineInstr *> Instrs;
   if (JumpTableBB && JumpTableBB->pred_size() == 1) {
     MachineBasicBlock *MBB = JumpTableBB->pred_begin()[0];
-    for (MachineBasicBlock::iterator MIIter = MBB->begin();
-         MIIter != MBB->end(); MIIter++) {
-      MachineInstr &CurMI = (*MIIter);
+    for (MachineInstr &MI : MBB->instrs()) {
 
-      if (CurMI.getOpcode() == ARM::CMPri &&
-          CurMI.getNextNode()->getOpcode() == ARM::STRi12) {
-        Instrs.push_back(CurMI.getNextNode());
+      if (MI.getOpcode() == ARM::CMPri &&
+          MI.getNextNode()->getOpcode() == ARM::STRi12) {
+        Instrs.push_back(MI.getNextNode());
       }
 
-      if (CurMI.getOpcode() == ARM::STRi12 &&
-          CurMI.getNextNode()->getOpcode() == ARM::Bcc) {
-        Instrs.push_back(CurMI.getNextNode());
+      if (MI.getOpcode() == ARM::STRi12 &&
+          MI.getNextNode()->getOpcode() == ARM::Bcc) {
+        Instrs.push_back(MI.getNextNode());
       }
     }
 
@@ -92,22 +73,20 @@ MachineBasicBlock *ARMCreateJumpTable::checkJumptableBB(MachineFunction &MF) {
   return JumpTableBB;
 }
 
-bool ARMCreateJumpTable::updatetheBranchInst(MachineBasicBlock &MBB) {
+bool ARMMachineInstructionRaiser::updateTheBranchInst(MachineBasicBlock &MBB) {
   MachineFunction *MF = MBB.getParent();
   const ARMSubtarget &STI = MF->getSubtarget<ARMSubtarget>();
   const ARMBaseInstrInfo *TII = STI.getInstrInfo();
 
   std::vector<MachineInstr *> Instrs;
-  for (MachineBasicBlock::iterator MIIter = MBB.begin(); MIIter != MBB.end();
-       MIIter++) {
-    MachineInstr &CurMI = (*MIIter);
+  for (MachineInstr &MI : MBB.instrs()) {
 
-    if (CurMI.getOpcode() == ARM::Bcc) {
-      for (unsigned int Idx = 0; Idx < CurMI.getNumOperands(); Idx++) {
-        LLVM_DEBUG(CurMI.getOperand(Idx).dump());
+    if (MI.getOpcode() == ARM::Bcc) {
+      for (unsigned int Idx = 0; Idx < MI.getNumOperands(); Idx++) {
+        LLVM_DEBUG(MI.getOperand(Idx).dump());
       }
-      BuildMI(&MBB, DebugLoc(), TII->get(ARM::B)).add(CurMI.getOperand(0));
-      Instrs.push_back(&CurMI);
+      BuildMI(&MBB, DebugLoc(), TII->get(ARM::B)).add(MI.getOperand(0));
+      Instrs.push_back(&MI);
     }
   }
 
@@ -117,13 +96,13 @@ bool ARMCreateJumpTable::updatetheBranchInst(MachineBasicBlock &MBB) {
   return true;
 }
 
-/// Raise the machine jumptable according to the CFG.
-bool ARMCreateJumpTable::raiseMaichineJumpTable(MachineFunction &MF) {
+/// Raise the machine jump table according to the CFG.
+bool ARMMachineInstructionRaiser::raiseMachineJumpTable(MachineFunction &MF) {
   // A vector to record MBBs that need to be erased upon jump table creation.
   std::vector<MachineBasicBlock *> MBBsToBeErased;
 
   std::map<uint64_t, MCInstOrData> MCInstMapData;
-  MCInstRaiser::const_mcinst_iter IterIn;
+  MCInstRaiser::const_mcinstr_iter IterIn;
 
   // Save the ADDri and Calculate the start address of data.
   for (MachineBasicBlock &JmpTblBaseCalcMBB : MF) {
@@ -154,23 +133,23 @@ bool ARMCreateJumpTable::raiseMaichineJumpTable(MachineFunction &MF) {
         // A vector of switch target MBBs
         std::vector<MachineBasicBlock *> JmpTgtMBBvec;
         assert(
-            MCIR != nullptr &&
+            InstRaiser != nullptr &&
             "Current function machine instruction raiser wasn't initialized!");
-        for (IterIn = MCIR->const_mcinstr_begin();
-             IterIn != MCIR->const_mcinstr_end(); IterIn++) {
+        for (IterIn = InstRaiser->const_mcinstr_begin();
+             IterIn != InstRaiser->const_mcinstr_end(); IterIn++) {
           MCInstOrData MCInstorData = IterIn->second;
           if (MCInstorData.isData() && MCInstorData.getData() > 0) {
             // The 16 is 8 + 8. The first 8 is the PC offset, the second 8 is
-            // the immediate of current instruction.
+            // the immediate value of current instruction.
             // If the current library is position-independent, the offset should
             // be CASE VALUE + PC + 8.
             // If the current library is not position-independent, the offset
             // should be CASE VALUE - text section address.
             uint64_t Offset =
                 IsFPIC ? (MCInstorData.getData() +
-                          MCIR->getMCInstIndex(JmpTblOffsetCalcMI) + 16)
+                          InstRaiser->getMCInstIndex(JmpTblOffsetCalcMI) + 16)
                        : (MCInstorData.getData() - MR->getTextSectionAddress());
-            auto MBBNo = MCIR->getMBBNumberOfMCInstOffset(Offset, MF);
+            auto MBBNo = InstRaiser->getMBBNumberOfMCInstOffset(Offset, MF);
             if (MBBNo != -1) {
               MachineBasicBlock *MBB = MF.getBlockNumbered(MBBNo);
               JmpTgtMBBvec.push_back(MBB);
@@ -187,7 +166,7 @@ bool ARMCreateJumpTable::raiseMaichineJumpTable(MachineFunction &MF) {
         // potentially contain the start of jump targets. If current block has
         // multiple predecessors this may not be a jump table. For now assert
         // this to discover potential situations in binaries. Change the assert
-        // to and continue if the assumption is correct.
+        // to continue if the assumption is correct.
         assert((JmpTblBaseCalcMBB.pred_size() == 1) &&
                "Expect a single predecessor during jump table discovery");
         MachineBasicBlock *JmpTblPredMBB = *(JmpTblBaseCalcMBB.pred_begin());
@@ -313,10 +292,10 @@ bool ARMCreateJumpTable::raiseMaichineJumpTable(MachineFunction &MF) {
 
         // The new machine instrucion should contain the metadata.
         // Create the metadata and add it to the machine instrucion.
-        LLVMContext &CTX = getModule()->getContext();
+        LLVMContext &Ctx(MF.getFunction().getContext());
         ConstantAsMetadata *CAM = ConstantAsMetadata::get(
-            ConstantInt::get(CTX, llvm::APInt(64, 0, false)));
-        MDNode *MDnode = MDNode::get(CTX, CAM);
+            ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
+        MDNode *MDnode = MDNode::get(Ctx, CAM);
         MIB.addMetadata(MDnode);
         JTList.push_back(JmpTblInfo);
       }
@@ -330,7 +309,7 @@ bool ARMCreateJumpTable::raiseMaichineJumpTable(MachineFunction &MF) {
   return true;
 }
 
-unsigned int ARMCreateJumpTable::getARMCPSR(unsigned int PhysReg) {
+unsigned int ARMMachineInstructionRaiser::getARMCPSR(unsigned int PhysReg) {
   // Get the ARM CPSR.
   if (PhysReg == ARM::CPSR) {
     return PhysReg;
@@ -338,34 +317,17 @@ unsigned int ARMCreateJumpTable::getARMCPSR(unsigned int PhysReg) {
   return -1;
 }
 
-bool ARMCreateJumpTable::getJTlist(std::vector<JumpTableInfo> &List) {
-  List = JTList;
-  return true;
-}
-
-bool ARMCreateJumpTable::create() {
+bool ARMMachineInstructionRaiser::createJumpTable() {
   LLVM_DEBUG(dbgs() << "ARMCreateJumpTable start.\n");
 
-  raiseMaichineJumpTable(*MF);
+  raiseMachineJumpTable(MF);
 
   // For debugging.
-  LLVM_DEBUG(MF->dump());
-  LLVM_DEBUG(RF->dump());
+  LLVM_DEBUG(MF.dump());
+  LLVM_DEBUG(RaisedFunction->dump());
   LLVM_DEBUG(dbgs() << "ARMCreateJumpTable end.\n");
 
   return false;
 }
 
-bool ARMCreateJumpTable::runOnMachineFunction(MachineFunction &MF) {
-  init();
-  return create();
-}
-
 #undef DEBUG_TYPE
-
-extern "C" FunctionPass *createARMCreateJumpTable(ARMModuleRaiser &MR,
-                                           MachineFunction *MF,
-                                           Function *RF,
-                                           MCInstRaiser *MCIR) {
-  return new ARMCreateJumpTable(MR, MF, RF, MCIR);
-}

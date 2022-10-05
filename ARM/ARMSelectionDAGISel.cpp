@@ -6,52 +6,48 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMSelectionDAGISel class
-// for use by llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMSelectionDAGISel.h"
+#include "ARMMachineInstructionRaiser.h"
+#include "DAG/DAGBuilder.h"
+#include "DAG/DAGRaisingInfo.h"
+#include "DAG/FunctionRaisingInfo.h"
+#include "DAG/IREmitter.h"
+#include "DAG/InstSelector.h"
+#include "Raiser/ModuleRaiser.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
+
+#define DEBUG_TYPE "mctoll"
 
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMSelectionDAGISel::ID = 0;
+void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo,
+                                                   DAGRaisingInfo *DAGInfo,
+                                                   MachineBasicBlock *MBB) {
 
-#define DEBUG_TYPE "mctoll"
-
-ARMSelectionDAGISel::ARMSelectionDAGISel(ARMModuleRaiser &CurrMR,
-                                         MachineFunction *CurrMF,
-                                         Function *CurrRF)
-    : ARMRaiserBase(ID, CurrMR) {
-  MF = CurrMF;
-  RF = CurrRF;
-  ORE = make_unique<OptimizationRemarkEmitter>(getRaisedFunction());
-  FuncInfo = new FunctionRaisingInfo();
-  CurDAG = new SelectionDAG(*MR->getTargetMachine(), CodeGenOpt::None);
-  DAGInfo = new DAGRaisingInfo(*CurDAG);
-  SDB = new DAGBuilder(*DAGInfo, *FuncInfo);
-  SLT = new InstSelector(*DAGInfo, *FuncInfo);
-}
-
-ARMSelectionDAGISel::~ARMSelectionDAGISel() {
-  delete SLT;
-  delete SDB;
-  delete DAGInfo;
-  delete CurDAG;
-  delete FuncInfo;
-}
-
-void ARMSelectionDAGISel::selectBasicBlock() {
-
-  for (MachineBasicBlock::const_iterator I = MBB->begin(), E = MBB->end();
-       I != E; ++I) {
-    SDB->visit(*I);
+  auto *SDB = new DAGBuilder(*DAGInfo, *FuncInfo);
+  for (MachineInstr &MI : MBB->instrs()) {
+    SDB->visit(MI);
   }
 
-  doInstructionSelection();
-  LLVM_DEBUG(dumpDAG());
-  emitDAG();
+  auto *SLT = new InstSelector(*DAGInfo, *FuncInfo);
+  auto *CurDAG = &DAGInfo->getCurDAG();
+  auto *BB = FuncInfo->getBasicBlock(*MBB);
+  IREmitter Imt(BB, DAGInfo, FuncInfo);
+  Imt.setjtList(JTList);
+  // doInstructionSelection + emitDAG
+  SelectionDAG::allnodes_iterator ISelPosition = CurDAG->allnodes_begin();
+  while (ISelPosition != CurDAG->allnodes_end()) {
+    SDNode *Node = &*ISelPosition++;
+    SLT->select(Node);
+    Imt.emitNode(Node);
+  }
+
+  LLVM_DEBUG(dumpDAG(CurDAG));
 
   // If the current function has return value, records relationship between
   // BasicBlock and each Value which is mapped with R0. In order to record
@@ -70,48 +66,33 @@ void ARMSelectionDAGISel::selectBasicBlock() {
   CurDAG->clear();
 }
 
-void ARMSelectionDAGISel::doInstructionSelection() {
-
-  SelectionDAG::allnodes_iterator ISelPosition = CurDAG->allnodes_begin();
-  while (ISelPosition != CurDAG->allnodes_end()) {
-    SDNode *Node = &*ISelPosition++;
-    SLT->select(Node);
-  }
-}
-
-void ARMSelectionDAGISel::emitDAG() {
-  IREmitter Imt(BB, DAGInfo, FuncInfo);
-  Imt.setjtList(JTList);
-  SelectionDAG::allnodes_iterator ISelPosition = CurDAG->allnodes_begin();
-  while (ISelPosition != CurDAG->allnodes_end()) {
-    SDNode *Node = &*ISelPosition++;
-    Imt.emitNode(Node);
-  }
-}
-
-void ARMSelectionDAGISel::initEntryBasicBlock() {
-  BasicBlock *EntryBlock = &RF->getEntryBlock();
+void ARMMachineInstructionRaiser::initEntryBasicBlock(FunctionRaisingInfo *FuncInfo) {
+  BasicBlock *EntryBlock = &RaisedFunction->getEntryBlock();
   for (unsigned Idx = 0; Idx < 4; Idx++) {
     Align MALG(32);
-    AllocaInst *Alloc = new AllocaInst(Type::getInt1Ty(RF->getContext()), 0,
+    AllocaInst *Alloc = new AllocaInst(Type::getInt1Ty(Ctx), 0,
                                        nullptr, MALG, "", EntryBlock);
     FuncInfo->AllocaMap[Idx] = Alloc;
-    new StoreInst(ConstantInt::getFalse(RF->getContext()), Alloc, EntryBlock);
+    new StoreInst(ConstantInt::getFalse(Ctx), Alloc, EntryBlock);
   }
 }
 
-bool ARMSelectionDAGISel::doSelection() {
+bool ARMMachineInstructionRaiser::doSelection() {
   LLVM_DEBUG(dbgs() << "ARMSelectionDAGISel start.\n");
 
   //MachineFunction &mf = *MF;
-  CurDAG->init(*MF, *ORE.get(), this, nullptr, nullptr, nullptr, nullptr);
-  FuncInfo->set(*MR, *getRaisedFunction(), *MF, CurDAG);
+  SelectionDAG *CurDAG = new SelectionDAG(*MR->getTargetMachine(), CodeGenOpt::None);
+  auto ORE = make_unique<OptimizationRemarkEmitter>(RaisedFunction);
+  CurDAG->init(MF, *ORE.get(), nullptr, nullptr, nullptr, nullptr, nullptr);
+  FunctionRaisingInfo *FuncInfo = new FunctionRaisingInfo();
+  FuncInfo->set(*TargetMR, *getRaisedFunction(), MF, CurDAG);
+  auto *DAGInfo = new DAGRaisingInfo(*CurDAG);
 
-  initEntryBasicBlock();
-  for (MachineBasicBlock &Block : *MF) {
-    MBB = &Block;
-    BB = FuncInfo->getOrCreateBasicBlock(MBB);
-    selectBasicBlock();
+  initEntryBasicBlock(FuncInfo);
+  for (MachineBasicBlock &Block : MF) {
+    // MBB = &Block;
+    FuncInfo->getOrCreateBasicBlock(&Block);
+    selectBasicBlock(FuncInfo, DAGInfo, &Block);
   }
 
   // Add an additional exit BasicBlock, all of original return BasicBlocks
@@ -135,32 +116,13 @@ bool ARMSelectionDAGISel::doSelection() {
     if (FBB.getTerminator() == nullptr)
       BranchInst::Create(LBB, &FBB);
 
-  FuncInfo->clear();
-
   // For debugging.
-  LLVM_DEBUG(MF->dump());
-  LLVM_DEBUG(getRaisedFunction()->dump());
+  LLVM_DEBUG(MF.dump());
+  LLVM_DEBUG(RaisedFunction->dump());
     LLVM_DEBUG(dbgs() << "ARMSelectionDAGISel end.\n");
 
   return true;
 }
-
-bool ARMSelectionDAGISel::setjtList(std::vector<JumpTableInfo> &List) {
-  JTList = List;
-  return true;
-}
-
-bool ARMSelectionDAGISel::runOnMachineFunction(MachineFunction &MF) {
-  init();
-  return doSelection();
-}
-
-extern "C" FunctionPass *createARMSelectionDAGISel(ARMModuleRaiser &MR,
-                                                   MachineFunction *MF,
-                                                   Function *RF) {
-  return new ARMSelectionDAGISel(MR, MF, RF);
-}
-
 
 // Modified version SelectionDAG::dump() for support EXT_ARMISD::NodeType
 // based on llvm/lib/CodeGen/SelectionDAG/SelectionDAGDumper.cpp
@@ -253,7 +215,7 @@ static void dumpNodes(const SelectionDAG *DAG, const SDNode *Node, unsigned Inde
   dumpNode(DAG, Node);
 }
 
-LLVM_DUMP_METHOD void ARMSelectionDAGISel::dumpDAG() {
+LLVM_DUMP_METHOD void ARMMachineInstructionRaiser::dumpDAG(SelectionDAG *CurDAG) {
   dbgs() << "SelectionDAG has " << CurDAG->allnodes_size() << " nodes:\n";
 
   auto *Root = CurDAG->getRoot().getNode();
@@ -267,3 +229,5 @@ LLVM_DUMP_METHOD void ARMSelectionDAGISel::dumpDAG() {
   dbgs() << "\n";
 }
 #endif
+
+#undef DEBUG_TYPE

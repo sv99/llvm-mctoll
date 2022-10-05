@@ -24,8 +24,6 @@ namespace mctoll {
 // Class that encapsulates raising for MCInst vector to MachineInstrs
 class MCInstRaiser {
 public:
-  using const_mcinst_iter = std::map<uint64_t, MCInstOrData>::const_iterator;
-
   MCInstRaiser(uint64_t Start, uint64_t End)
       : FuncStart(Start), FuncEnd(End), DataInCode(false){};
 
@@ -78,14 +76,18 @@ public:
   // return -1 if no MCinst offset maps to the specified MBB
   int64_t getMCInstOffsetOfMBBNumber(uint64_t MBBNum) const;
 
+  using const_mcinstr_iter = std::map<uint64_t, MCInstOrData>::const_iterator;
+  const_mcinstr_iter const_mcinstr_begin() const { return InstMap.begin(); }
+  const_mcinstr_iter const_mcinstr_end() const { return InstMap.end(); }
+  using const_mcinstr_range = iterator_range<const_mcinstr_iter>;
+  const_mcinstr_range mcinstrs() const {
+    return const_mcinstr_range(const_mcinstr_begin(), const_mcinstr_end());
+  }
   // Returns the iterator pointing to MCInstOrData at Offset in
   // input instruction stream.
-  const_mcinst_iter getMCInstAt(uint64_t Offset) const {
+  const_mcinstr_iter getMCInstAt(uint64_t Offset) const {
     return InstMap.find(Offset);
   }
-
-  const_mcinst_iter const_mcinstr_begin() const { return InstMap.begin(); }
-  const_mcinst_iter const_mcinstr_end() const { return InstMap.end(); }
 
   // Get the size of instruction
   uint64_t getMCInstSize(uint64_t Offset) const;

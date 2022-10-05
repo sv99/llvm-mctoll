@@ -4624,7 +4624,7 @@ bool X86MachineInstructionRaiser::raiseDirectBranchMachineInstr(
     CTRec->Raised = true;
   } else if (MI->isConditionalBranch()) {
     // Find the fall through basic block
-    MCInstRaiser::const_mcinst_iter MCIter = MCIR->getMCInstAt(MCInstOffset);
+    auto MCIter = MCIR->getMCInstAt(MCInstOffset);
     LLVMContext &Ctx(MF.getFunction().getContext());
     // Go to next non-nop instruction on the fall-through path.
     bool IsNop = true;

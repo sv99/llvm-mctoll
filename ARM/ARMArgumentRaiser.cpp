@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMArgumentRaiser class for use by
-// llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMArgumentRaiser.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
@@ -22,33 +22,13 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMArgumentRaiser::ID = 0;
-
-ARMArgumentRaiser::ARMArgumentRaiser(ARMModuleRaiser &CurrMR,
-                                     MachineFunction *CurrMF,
-                                     Function *CurrRF)
-    : ARMRaiserBase(ID, CurrMR) {
-  MF = CurrMF;
-  RF = CurrRF;
-  MFI = &MF->getFrameInfo();
-  TII = MF->getSubtarget<ARMSubtarget>().getInstrInfo();
-}
-
-ARMArgumentRaiser::~ARMArgumentRaiser() {}
-
 /// Change all return relative register operands to stack 0.
-void ARMArgumentRaiser::updateReturnRegister(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateReturnRegister(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     if (MBB.succ_empty()) {
       bool Loop = true;
-      for (MachineBasicBlock::reverse_iterator IIter = MBB.rbegin(),
-                                               IEnd = MBB.rend();
-           (IIter != IEnd) && Loop; ++IIter) {
-        MachineInstr &MI = *IIter;
-        for (MachineInstr::mop_iterator OpIter = MI.operands_begin(),
-                                        OpEnd = MI.operands_end();
-             OpIter != OpEnd; OpIter++) {
-          MachineOperand &MO = *OpIter;
+      for (MachineInstr &MI : MBB.instrs()) {
+        for (MachineOperand &MO : MI.operands()) {
           if (MO.isReg() && (MO.getReg() == ARM::R0)) {
             if (MO.isDef()) {
               MO.ChangeToFrameIndex(0);
@@ -64,16 +44,10 @@ void ARMArgumentRaiser::updateReturnRegister(MachineFunction &MF) {
 
 /// Change all function arguments of registers into stack elements with same
 /// indexes of arguments.
-void ARMArgumentRaiser::updateParameterRegister(unsigned Reg,
+void ARMMachineInstructionRaiser::updateParameterRegister(unsigned Reg,
                                                 MachineBasicBlock &MBB) {
-  for (MachineBasicBlock::iterator IIter = MBB.begin(), IEnd = MBB.end();
-       IIter != IEnd;
-       ++IIter) {
-    MachineInstr &MI = *IIter;
-    for (MachineInstr::mop_iterator OpIter = MI.operands_begin(),
-                                    OpEnd = MI.operands_end();
-         OpIter != OpEnd; OpIter++) {
-      MachineOperand &MO = *OpIter;
+  for (MachineInstr &MI : MBB.instrs()) {
+    for (MachineOperand &MO : MI.operands()) {
       if (MO.isReg() && (MO.getReg() == Reg)) {
         if (MO.isUse()) {
           // The argument's index on frame starts from 1.
@@ -88,15 +62,11 @@ void ARMArgumentRaiser::updateParameterRegister(unsigned Reg,
 }
 
 /// Change rest of function arguments on stack frame into stack elements.
-void ARMArgumentRaiser::updateParameterFrame(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateParameterFrame(MachineFunction &MF) {
 
-  for (MachineFunction::iterator MBBIter = MF.begin(), MBBEnd = MF.end();
-       MBBIter != MBBEnd; ++MBBIter) {
-    MachineBasicBlock &MBB = *MBBIter;
+  for (MachineBasicBlock &MBB : MF) {
 
-    for (MachineBasicBlock::iterator MIIter = MBB.begin(), MIEnd = MBB.end();
-         MIIter != MIEnd; ++MIIter) {
-      MachineInstr &MI = *MIIter;
+    for (MachineInstr &MI : MBB.instrs()) {
       // Match pattern like ldr r1, [fp, #8].
       if (MI.getOpcode() == ARM::LDRi12 && MI.getNumOperands() > 2) {
         MachineOperand &MO = MI.getOperand(1);
@@ -120,10 +90,10 @@ void ARMArgumentRaiser::updateParameterFrame(MachineFunction &MF) {
 
 /// Move arguments which are passed by ARM registers(R0 - R3) from function
 /// arg.x to corresponding registers in entry block.
-void ARMArgumentRaiser::moveArgumentToRegister(unsigned Reg,
+void ARMMachineInstructionRaiser::moveArgumentToRegister(unsigned Reg,
                                                MachineBasicBlock &PMBB) {
-  const MCInstrDesc &InstrDesc = TII->get(ARM::MOVr);
-  MachineInstrBuilder Builder = BuildMI(*MF, *(new DebugLoc()), InstrDesc);
+  const MCInstrDesc &InstrDesc = TargetInfo.getInstrInfo()->get(ARM::MOVr);
+  MachineInstrBuilder Builder = BuildMI(MF, *(new DebugLoc()), InstrDesc);
   Builder.addDef(Reg);
   Builder.addFrameIndex(Reg - ARM::R0 + 1);
   PMBB.insert(PMBB.begin(), Builder.getInstr());
@@ -131,10 +101,10 @@ void ARMArgumentRaiser::moveArgumentToRegister(unsigned Reg,
 
 /// updateParameterInstr - Using newly created stack elements replace relative
 /// operands in MachineInstr.
-void ARMArgumentRaiser::updateParameterInstr(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateParameterInstr(MachineFunction &MF) {
   // Move arguments to corresponding registers.
   MachineBasicBlock &EntryMBB = MF.front();
-  switch (RF->arg_size()) {
+  switch (RaisedFunction->arg_size()) {
   default:
     updateParameterFrame(MF);
     LLVM_FALLTHROUGH;
@@ -155,38 +125,27 @@ void ARMArgumentRaiser::updateParameterInstr(MachineFunction &MF) {
   }
 }
 
-bool ARMArgumentRaiser::raiseArgs() {
+bool ARMMachineInstructionRaiser::raiseArgs() {
   LLVM_DEBUG(dbgs() << "ARMArgumentRaiser start.\n");
 
   int ArgIdx = 1;
-  for (Function::arg_iterator ArgIter = RF->arg_begin(), ArgEnd = RF->arg_end();
-       ArgIter != ArgEnd; ++ArgIter)
-    ArgIter->setName("arg." + std::to_string(ArgIdx++));
+  for (Argument &Arg : RaisedFunction->args())
+    Arg.setName("arg." + std::to_string(ArgIdx++));
 
-  for (unsigned Idx = 0, End = RF->arg_size() + 1; Idx < End; ++Idx) {
+  for (unsigned Idx = 0, End = RaisedFunction->arg_size() + 1; Idx < End; ++Idx) {
     Align ALG(32);
-    MFI->CreateStackObject(32, ALG, false);
+    MF.getFrameInfo().CreateStackObject(32, ALG, false);
   }
 
-  updateParameterInstr(*MF);
+  updateParameterInstr(MF);
 
   // For debugging.
-  LLVM_DEBUG(MF->dump());
+  LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(getRaisedFunction()->dump());
   LLVM_DEBUG(dbgs() << "ARMArgumentRaiser end.\n");
 
   return true;
 }
 
-bool ARMArgumentRaiser::runOnMachineFunction(MachineFunction &MF) {
-  init();
-  return raiseArgs();
-}
-
 #undef DEBUG_TYPE
 
-extern "C" FunctionPass *createARMArgumentRaiser(ARMModuleRaiser &MR,
-                                                 MachineFunction *MF,
-                                                 Function *RF) {
-  return new ARMArgumentRaiser(MR, MF, RF);
-}

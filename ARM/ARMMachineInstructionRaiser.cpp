@@ -11,51 +11,40 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMArgumentRaiser.h"
-#include "ARMCreateJumpTable.h"
-#include "ARMEliminatePrologEpilog.h"
-#include "ARMFrameBuilder.h"
-#include "ARMFunctionPrototype.h"
-#include "ARMInstructionSplitting.h"
-#include "ARMMIRevising.h"
 #include "ARMMachineInstructionRaiser.h"
 #include "ARMModuleRaiser.h"
-#include "ARMSelectionDAGISel.h"
+#include "Raiser/MachineFunctionRaiser.h"
+#include "llvm/Support/Debug.h"
+#include <ARMSubtarget.h>
 
 using namespace llvm;
 using namespace llvm::mctoll;
 
 ARMMachineInstructionRaiser::ARMMachineInstructionRaiser(
     MachineFunction &MF, const ModuleRaiser *MR, MCInstRaiser *MCIR)
-    : MachineInstructionRaiser(MF, MR, MCIR), MachineRegInfo(MF.getRegInfo()) {}
+    : MachineInstructionRaiser(MF, MR, MCIR),
+      MachineRegInfo(MF.getRegInfo()),
+      TargetInfo(MF.getSubtarget<ARMSubtarget>()),
+      Ctx(MR->getModule()->getContext()){
+  M = MR->getModule();
+  InstrInfo = TargetInfo.getInstrInfo();
+  RegisterInfo = TargetInfo.getRegisterInfo();
+  const ARMModuleRaiser *ConstAMR = dyn_cast<ARMModuleRaiser>(MR);
+  TargetMR = const_cast<ARMModuleRaiser *>(ConstAMR);
+}
 
 bool ARMMachineInstructionRaiser::raise() {
-  const ARMModuleRaiser *ConstAMR = dyn_cast<ARMModuleRaiser>(MR);
-  assert(ConstAMR != nullptr && "The ARM module raiser is not initialized!");
-  ARMModuleRaiser &AMR = const_cast<ARMModuleRaiser &>(*ConstAMR);
 
-  ARMMIRevising MIR(AMR,&MF, RaisedFunction, InstRaiser);
-  MIR.revise();
+  revise();
+  eliminate();
+  createJumpTable();
+  raiseArgs();
+  buildFrame();
+  split();
 
-  ARMEliminatePrologEpilog EPE(AMR, &MF, RaisedFunction);
-  EPE.eliminate();
-
-  ARMCreateJumpTable CJT(AMR, &MF, RaisedFunction, InstRaiser);
-  CJT.create();
-  CJT.getJTlist(JTList);
-
-  ARMArgumentRaiser AR(AMR, &MF, RaisedFunction);
-  AR.raiseArgs();
-
-  ARMFrameBuilder FB(AMR, &MF, RaisedFunction);
-  FB.build();
-
-  ARMInstructionSplitting ISpl(AMR, &MF, RaisedFunction);
-  ISpl.split();
-
-  ARMSelectionDAGISel SelDis(AMR, &MF, RaisedFunction);
-  SelDis.setjtList(JTList);
-  SelDis.doSelection();
+//  ARMSelectionDAGISel SelDis(AMR, &MF, RaisedFunction);
+//  SelDis.setjtList(JTList);
+  doSelection();
 
   return true;
 }
@@ -82,8 +71,7 @@ Value *ARMMachineInstructionRaiser::getRegOrArgValue(unsigned PReg, int MBBNo) {
 }
 
 FunctionType *ARMMachineInstructionRaiser::getRaisedFunctionPrototype() {
-  ARMFunctionPrototype AFP;
-  RaisedFunction = AFP.discover(MF);
+  RaisedFunction = discoverPrototype(MF);
 
   Function *Ori = const_cast<Function *>(&MF.getFunction());
   // Insert the map of raised function to tempFunctionPointer.
