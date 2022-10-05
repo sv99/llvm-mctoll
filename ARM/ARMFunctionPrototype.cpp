@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMFunctionPrototype class
-// for use by llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMFunctionPrototype.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallVector.h"
@@ -24,14 +24,8 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMFunctionPrototype::ID = 0;
-
-ARMFunctionPrototype::ARMFunctionPrototype() : MachineFunctionPass(ID) {}
-
-ARMFunctionPrototype::~ARMFunctionPrototype() {}
-
 /// Check the first reference of the reg is USE.
-bool ARMFunctionPrototype::isUsedRegiser(unsigned Reg,
+bool ARMMachineInstructionRaiser::isUsedRegiser(unsigned Reg,
                                          const MachineBasicBlock &MBB) {
   for (MachineBasicBlock::const_iterator BegIter = MBB.begin(),
                                          EndIter = MBB.end();
@@ -50,11 +44,11 @@ bool ARMFunctionPrototype::isUsedRegiser(unsigned Reg,
 }
 
 /// Check the first reference of the reg is DEF.
-void ARMFunctionPrototype::genParameterTypes(std::vector<Type *> &ParamVec) {
-  assert(!MF->empty() && "The function body is empty!!!");
-  MF->getRegInfo().freezeReservedRegs(*MF);
+void ARMMachineInstructionRaiser::genParameterTypes(std::vector<Type *> &ParamVec) {
+  assert(!MF.empty() && "The function body is empty!!!");
+  MF.getRegInfo().freezeReservedRegs(MF);
   LivePhysRegs LiveInPhysRegs;
-  for (MachineBasicBlock &EMBB : *MF)
+  for (MachineBasicBlock &EMBB : MF)
     computeAndAddLiveIns(LiveInPhysRegs, EMBB);
   // Walk the CFG DFS to discover first register usage
   df_iterator_default_set<const MachineBasicBlock *, 16> Visited;
@@ -63,9 +57,9 @@ void ARMFunctionPrototype::genParameterTypes(std::vector<Type *> &ParamVec) {
   ArgObtain[ARM::R1] = false;
   ArgObtain[ARM::R2] = false;
   ArgObtain[ARM::R3] = false;
-  const MachineBasicBlock &MBBFront = MF->front();
+  const MachineBasicBlock &MBBFront = MF.front();
   DenseMap<int, Type *> TyArr;
-  int MaxIdx = -1; // When the maxidx is -1, means there is no argument.
+  int MaxIdx = -1; // When the MaxIdx is -1, means there is no argument.
   // Track register liveness on CFG.
   for (const MachineBasicBlock *Mbb : depth_first_ext(&MBBFront, Visited)) {
     for (unsigned IReg = ARM::R0; IReg < ARM::R4; IReg++) {
@@ -91,7 +85,7 @@ void ARMFunctionPrototype::genParameterTypes(std::vector<Type *> &ParamVec) {
     }
   }
   // The rest of function arguments are from stack.
-  for (MachineFunction::const_iterator BegMBBIter = MF->begin(), EndMBBIter = MF->end();
+  for (MachineFunction::const_iterator BegMBBIter = MF.begin(), EndMBBIter = MF.end();
        BegMBBIter != EndMBBIter; ++BegMBBIter) {
     const MachineBasicBlock &Mbb = *BegMBBIter;
     for (MachineBasicBlock::const_iterator Mii = Mbb.begin(), Mie = Mbb.end();
@@ -138,7 +132,7 @@ void ARMFunctionPrototype::genParameterTypes(std::vector<Type *> &ParamVec) {
 }
 
 /// Get all arguments types of current MachineFunction.
-bool ARMFunctionPrototype::isDefinedRegiser(unsigned Reg,
+bool ARMMachineInstructionRaiser::isDefinedRegiser(unsigned Reg,
                                             const MachineBasicBlock &MBB) {
   for (MachineBasicBlock::const_reverse_iterator Ii = MBB.rbegin(),
                                                  Ie = MBB.rend();
@@ -163,11 +157,11 @@ bool ARMFunctionPrototype::isDefinedRegiser(unsigned Reg,
 }
 
 /// Get return type of current MachineFunction.
-Type *ARMFunctionPrototype::genReturnType() {
+Type *ARMMachineInstructionRaiser::genReturnType() {
   // TODO: Need to track register liveness on CFG.
   Type *RetTy;
-  RetTy = Type::getVoidTy(*CTX);
-  for (const MachineBasicBlock &MBB : *MF) {
+  RetTy = Type::getVoidTy(Ctx);
+  for (const MachineBasicBlock &MBB : MF) {
     if (MBB.succ_empty()) {
       if (isDefinedRegiser(ARM::R0, MBB)) {
         // TODO: Need to identify data type, int, long, float or double.
@@ -180,12 +174,10 @@ Type *ARMFunctionPrototype::genReturnType() {
   return RetTy;
 }
 
-Function *ARMFunctionPrototype::discover(MachineFunction &MachFunc) {
+Function *ARMMachineInstructionRaiser::discoverPrototype(MachineFunction &MachFunc) {
   LLVM_DEBUG(dbgs() << "ARMFunctionPrototype start.\n");
 
-  MF = &MachFunc;
   Function &Fn = const_cast<Function &>(MachFunc.getFunction());
-  CTX = &Fn.getContext();
 
   std::vector<Type *> ParamTys;
   genParameterTypes(ParamTys);
@@ -201,28 +193,11 @@ Function *ARMFunctionPrototype::discover(MachineFunction &MachFunc) {
   // EntryBlock at here.
   BasicBlock::Create(Pnfn->getContext(), "EntryBlock", Pnfn);
 
-  LLVM_DEBUG(MF->dump());
+  LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(Pnfn->dump());
   LLVM_DEBUG(dbgs() << "ARMFunctionPrototype end.\n");
 
   return Pnfn;
 }
 
-bool ARMFunctionPrototype::runOnMachineFunction(MachineFunction &MachFunc) {
-  discover(MachFunc);
-  return true;
-}
-
 #undef DEBUG_TYPE
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-MachineFunctionPass *initializeARMFunctionPrototype() {
-  return new ARMFunctionPrototype();
-}
-
-#ifdef __cplusplus
-}
-#endif

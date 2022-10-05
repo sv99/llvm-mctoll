@@ -6,35 +6,22 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMFrameBuilder class for use by
-// llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMFrameBuilder.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/IR/DataLayout.h"
 
 #define DEBUG_TYPE "mctoll"
 
 using namespace llvm;
 using namespace llvm::mctoll;
-
-char ARMFrameBuilder::ID = 0;
-
-ARMFrameBuilder::ARMFrameBuilder(ARMModuleRaiser &CurrMR,
-                                 MachineFunction *CurrMF,
-                                 Function *CurrRF)
-    : ARMRaiserBase(ID, CurrMR) {
-  MF = CurrMF;
-  RF = CurrRF;
-  MFI = &MF->getFrameInfo();
-  Module *M = getModule();
-  CTX = &M->getContext();
-  DLT = &M->getDataLayout();
-}
-
-ARMFrameBuilder::~ARMFrameBuilder() {}
 
 static bool isLoadOP(unsigned Opcode) {
   switch (Opcode) {
@@ -83,12 +70,13 @@ static inline bool isHalfwordOP(unsigned Opcode) {
   return Res;
 }
 
-unsigned ARMFrameBuilder::getBitCount(unsigned Opcode) {
+unsigned ARMMachineInstructionRaiser::getBitCount(unsigned Opcode) {
   unsigned Ret;
+  Module *M = MR->getModule();
 
   switch (Opcode) {
   default:
-    Ret = Log2(DLT->getStackAlignment());
+    Ret = Log2(M->getDataLayout().getStackAlignment());
     break;
   case ARM::LDRi12:
   case ARM::STRi12:
@@ -111,26 +99,26 @@ unsigned ARMFrameBuilder::getBitCount(unsigned Opcode) {
   return Ret;
 }
 
-Type *ARMFrameBuilder::getStackType(unsigned Size) {
+Type *ARMMachineInstructionRaiser::getStackType(unsigned Size) {
   Type *T = nullptr;
-  Module *M = getModule();
+  Module *M = MR->getModule();
+  LLVMContext &Ctx(M->getContext());
 
   switch (Size) {
   default:
-    T = Type::getIntNTy(M->getContext(),
-                        M->getDataLayout().getPointerSizeInBits());
+    T = Type::getIntNTy(Ctx, M->getDataLayout().getPointerSizeInBits());
     break;
   case 8:
-    T = Type::getInt64Ty(*CTX);
+    T = Type::getInt64Ty(Ctx);
     break;
   case 4:
-    T = Type::getInt32Ty(*CTX);
+    T = Type::getInt32Ty(Ctx);
     break;
   case 2:
-    T = Type::getInt16Ty(*CTX);
+    T = Type::getInt16Ty(Ctx);
     break;
   case 1:
-    T = Type::getInt8Ty(*CTX);
+    T = Type::getInt8Ty(Ctx);
     break;
   }
 
@@ -142,7 +130,7 @@ Type *ARMFrameBuilder::getStackType(unsigned Size) {
 /// mov r5, sp
 /// ldr r3, [r5, #4]
 /// In this case, r5 should be replace by sp.
-bool ARMFrameBuilder::replaceNonSPBySP(MachineInstr &MI) {
+bool ARMMachineInstructionRaiser::replaceNonSPBySP(MachineInstr &MI) {
   if (MI.getOpcode() == ARM::MOVr) {
     if (MI.getOperand(1).isReg() && MI.getOperand(1).getReg() == ARM::SP) {
       if (MI.getOperand(0).isReg() && MI.getOperand(0).isDef()) {
@@ -180,7 +168,7 @@ bool ARMFrameBuilder::replaceNonSPBySP(MachineInstr &MI) {
 /// ldr r3, [sp, #12]
 /// str r4, [fp, #-8]
 /// add r0, sp, #imm
-int64_t ARMFrameBuilder::identifyStackOp(const MachineInstr &MI) {
+int64_t ARMMachineInstructionRaiser::identifyStackOp(const MachineInstr &MI) {
   unsigned Opc = MI.getOpcode();
   if (!isLoadOP(Opc) && !isStoreOP(Opc) && !isAddOP(Opc))
     return -1;
@@ -209,6 +197,7 @@ int64_t ARMFrameBuilder::identifyStackOp(const MachineInstr &MI) {
       else
         return -1;
     }
+    auto *MFI = &MF.getFrameInfo();
     return MFI->getStackSize() + Offset + MFI->getOffsetAdjustment();
   }
 
@@ -216,7 +205,7 @@ int64_t ARMFrameBuilder::identifyStackOp(const MachineInstr &MI) {
 }
 
 /// Find out all of frame relative operands, and update them.
-void ARMFrameBuilder::searchStackObjects(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::searchStackObjects(MachineFunction &MF) {
   // <SPOffset, frame_element_ptr>
   std::map<int64_t, StackElement *, std::greater<int64_t>> SPOffElementMap;
   DenseMap<MachineInstr *, StackElement *> InstrToElementMap;
@@ -272,6 +261,7 @@ void ARMFrameBuilder::searchStackObjects(MachineFunction &MF) {
     Align MALG(SElm->Size);
     AllocaInst *Alc =
         new AllocaInst(getStackType(SElm->Size), 0, nullptr, MALG, "", EntryBB);
+    auto *MFI = &MF.getFrameInfo();
     int Idx = MFI->CreateStackObject(SElm->Size, Align(4), false, Alc);
     Alc->setName("stack." + std::to_string(Idx));
     MFI->setObjectOffset(Idx, SElm->SPOffset);
@@ -295,28 +285,17 @@ void ARMFrameBuilder::searchStackObjects(MachineFunction &MF) {
     delete Elm.second;
 }
 
-bool ARMFrameBuilder::build() {
+bool ARMMachineInstructionRaiser::buildFrame() {
   LLVM_DEBUG(dbgs() << "ARMFrameBuilder start.\n");
 
-  searchStackObjects(*MF);
+  searchStackObjects(MF);
 
   // For debugging.
-  LLVM_DEBUG(MF->dump());
-  LLVM_DEBUG(getRaisedFunction()->dump());
+  LLVM_DEBUG(MF.dump());
+  LLVM_DEBUG(RaisedFunction->dump());
   LLVM_DEBUG(dbgs() << "ARMFrameBuilder end.\n");
 
   return true;
 }
 
-bool ARMFrameBuilder::runOnMachineFunction(MachineFunction &MF) {
-  init();
-  return build();
-}
-
 #undef DEBUG_TYPE
-
-extern "C" FunctionPass *createARMFrameBuilder(ARMModuleRaiser &MR,
-                                               MachineFunction *MF,
-                                               Function *RF) {
-  return new ARMFrameBuilder(MR, MF, RF);
-}

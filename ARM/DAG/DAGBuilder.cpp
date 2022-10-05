@@ -26,10 +26,7 @@ void DAGBuilder::visit(const MachineInstr &MI) {
   std::vector<SDValue> VCtv;
   std::vector<EVT> VCtt;
 
-  for (MachineInstr::const_mop_iterator B = MI.operands_begin(),
-                                        E = MI.operands_end();
-       B != E; ++B) {
-    const MachineOperand &MO = *B;
+  for (const MachineOperand MO : MI.operands()) {
 
     if (MO.isReg() && !MO.isDebug()) {
       EVT Evt = EVT::getEVT(FuncInfo.getDefaultType());

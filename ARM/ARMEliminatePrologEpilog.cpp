@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the implementation of ARMEliminatePrologEpilog class
-// for use by llvm-mctoll.
+// This file contains the part implementation of ARMMachineInstructionRaiser
+// class for use by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMEliminatePrologEpilog.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/Support/Debug.h"
@@ -21,21 +21,9 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-char ARMEliminatePrologEpilog::ID = 0;
-
-ARMEliminatePrologEpilog::ARMEliminatePrologEpilog(ARMModuleRaiser &MR,
-                                                   MachineFunction *CurrMF,
-                                                   Function *CurrRF)
-    : ARMRaiserBase(ID, MR) {
-  MF = CurrMF;
-  RF = CurrRF;
-}
-
-ARMEliminatePrologEpilog::~ARMEliminatePrologEpilog() {}
-
 /// Return true if an operand in the instrs vector matches the passed register
 /// number, otherwise false.
-bool ARMEliminatePrologEpilog::checkRegister(
+bool ARMMachineInstructionRaiser::checkRegister(
     unsigned Reg, std::vector<MachineInstr *> &Instrs) const {
   std::vector<MachineInstr *>::iterator Iter = Instrs.begin();
   for (; Iter < Instrs.end(); ++Iter) {
@@ -79,7 +67,7 @@ bool ARMEliminatePrologEpilog::checkRegister(
 ///       sub r11, r12, #16
 ///
 ///       ldmdb r13, {r4-r11, r13, r15}
-bool ARMEliminatePrologEpilog::eliminateProlog(MachineFunction &MF) const {
+bool ARMMachineInstructionRaiser::eliminateProlog(MachineFunction &MF) const {
   std::vector<MachineInstr *> PrologInstrs;
   MachineBasicBlock &FrontMBB = MF.front();
 
@@ -208,7 +196,7 @@ bool ARMEliminatePrologEpilog::eliminateProlog(MachineFunction &MF) const {
   return true;
 }
 
-bool ARMEliminatePrologEpilog::eliminateEpilog(MachineFunction &MF) const {
+bool ARMMachineInstructionRaiser::eliminateEpilog(MachineFunction &MF) const {
   const ARMSubtarget &STI = MF.getSubtarget<ARMSubtarget>();
   const ARMBaseRegisterInfo *RegInfo = STI.getRegisterInfo();
   const ARMBaseInstrInfo *TII = STI.getInstrInfo();
@@ -292,7 +280,7 @@ bool ARMEliminatePrologEpilog::eliminateEpilog(MachineFunction &MF) const {
 /// Analyze stack size base on moving sp.
 /// Patterns like:
 /// sub	sp, sp, #28
-void ARMEliminatePrologEpilog::analyzeStackSize(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::analyzeStackSize(MachineFunction &MF) {
   if (MF.size() < 1)
     return;
 
@@ -312,7 +300,7 @@ void ARMEliminatePrologEpilog::analyzeStackSize(MachineFunction &MF) {
 /// Analyze frame adjustment base on the offset between fp and base sp.
 /// Patterns like:
 /// add	fp, sp, #8
-void ARMEliminatePrologEpilog::analyzeFrameAdjustment(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::analyzeFrameAdjustment(MachineFunction &MF) {
   if (MF.size() < 1)
     return;
 
@@ -329,36 +317,23 @@ void ARMEliminatePrologEpilog::analyzeFrameAdjustment(MachineFunction &MF) {
   }
 }
 
-bool ARMEliminatePrologEpilog::eliminate() {
+bool ARMMachineInstructionRaiser::eliminate() {
   LLVM_DEBUG(dbgs() << "ARMEliminatePrologEpilog start.\n");
 
-  analyzeStackSize(*MF);
-  analyzeFrameAdjustment(*MF);
-  bool Success = eliminateProlog(*MF);
+  analyzeStackSize(MF);
+  analyzeFrameAdjustment(MF);
+  bool Success = eliminateProlog(MF);
 
   if (Success) {
-    Success = eliminateEpilog(*MF);
+    Success = eliminateEpilog(MF);
   }
 
   // For debugging.
-  LLVM_DEBUG(MF->dump());
-  LLVM_DEBUG(getRaisedFunction()->dump());
+  LLVM_DEBUG(MF.dump());
+  LLVM_DEBUG(RaisedFunction->dump());
   LLVM_DEBUG(dbgs() << "ARMEliminatePrologEpilog end.\n");
 
   return !Success;
 }
 
-bool ARMEliminatePrologEpilog::runOnMachineFunction(MachineFunction &MF) {
-  bool Rtn = false;
-  init();
-  Rtn = eliminate();
-  return Rtn;
-}
-
 #undef DEBUG_TYPE
-
-extern "C" FunctionPass *createARMEliminatePrologEpilog(ARMModuleRaiser &MR,
-                                                        MachineFunction *MF,
-                                                        Function *RF) {
-  return new ARMEliminatePrologEpilog(MR, MF, RF);
-}
