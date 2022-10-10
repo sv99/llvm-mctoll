@@ -187,7 +187,7 @@ LLVM_DUMP_METHOD void ARMMachineInstructionRaiser::dumpDAG(SelectionDAG *CurDAG)
 void ARMMachineInstructionRaiser::selectBasicBlock(
     FunctionRaisingInfo *FuncInfo, MachineBasicBlock *MBB) {
 
-  auto *BB = FuncInfo->getBasicBlock(*MBB);
+  auto *BB = FuncInfo->getOrCreateBasicBlock(MBB);
   auto *CurDAG = &FuncInfo->getCurDAG();
 
   for (MachineInstr &MI : MBB->instrs()) {

@@ -523,7 +523,7 @@ static uint64_t getMCInstIndex(const MachineInstr &MI) {
 void ARMMachineInstructionRaiser::emitInstr(
     FunctionRaisingInfo *FuncInfo, BasicBlock *BB, MachineInstr &MI) {
   SDNode *Node = visit(FuncInfo, MI);
-  SDNode *SelNode = selectCode(FuncInfo, Node);
+  SDNode *SelNode = selectCode(FuncInfo, BB, Node);
   if (SelNode) {
     emitSDNode(FuncInfo, BB, SelNode);
   }
@@ -576,7 +576,7 @@ void ARMMachineInstructionRaiser::emitSDNode(
     Value *Inst = nullptr;
     if (FuncInfo->NPMap[Node]->HasCPSR) {
       unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-      // Create new BB for EQ instructin exectute.
+      // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
       BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -653,7 +653,7 @@ void ARMMachineInstructionRaiser::emitSDNode(
 
     if (FuncInfo->NPMap[Node]->HasCPSR) {
       unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-      // Create new BB for EQ instructin exectute.
+      // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
       BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -846,7 +846,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
       BasicBlock *CondBB =
           FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].ConditionMBB);
 
-      // conditon instruction
+      // condition instruction
       Instruction *CondInst = nullptr;
       for (BasicBlock::iterator DI = CondBB->begin(); DI != CondBB->end(); DI++) {
         Instruction *Ins = dyn_cast<Instruction>(DI);
@@ -891,7 +891,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
 
         emitSpecialCPSR(FuncInfo, Inst, BB, 0);
       } else {
-        // Create new BB for EQ instructin exectute.
+        // Create new BB for EQ instruction execute.
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -944,7 +944,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         CFlag = IRB.CreateAnd(S0, Val1);
         IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
       } else {
-        // Create new BB for EQ instructin exectute.
+        // Create new BB for EQ instruction execute.
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -1075,7 +1075,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
 
     if (FuncInfo->NPMap[Node]->HasCPSR) {
       unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-      // Create new BB for EQ instructin exectute.
+      // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
       BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -1153,7 +1153,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
 
     if (FuncInfo->NPMap[Node]->HasCPSR) {
       unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-      // Create new BB for EQ instructin exectute.
+      // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
       BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -1273,7 +1273,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         else
           emitCPSR(FuncInfo, S0, S1, BB, 0);
       } else {
-        // Create new BB for EQ instructin exectute.
+        // Create new BB for EQ instruction execute.
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());

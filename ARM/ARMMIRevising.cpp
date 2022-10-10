@@ -64,8 +64,8 @@ uint64_t getLoadAlignProgramHeader(const ELFFile<ELFT> *Obj) {
 }
 
 /// Create function for external function.
-uint64_t ARMMachineInstructionRaiser::getCalledFunctionAtPLTOffset(uint64_t PLTEndOff,
-                                                     uint64_t CallAddr) {
+uint64_t ARMMachineInstructionRaiser::getCalledFunctionAtPLTOffset(
+    uint64_t PLTEndOff, uint64_t CallAddr) {
   const ELF32LEObjectFile *Elf32LEObjFile =
       dyn_cast<ELF32LEObjectFile>(MR->getObjectFile());
   assert(Elf32LEObjFile != nullptr &&
@@ -222,8 +222,8 @@ void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MInst) {
 }
 
 /// Find global value by PC offset.
-const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(int64_t MCInstOffset,
-                                                   uint64_t PCOffset) {
+const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
+    int64_t MCInstOffset, uint64_t PCOffset) {
   const Value *GlobVal = nullptr;
   const ELF32LEObjectFile *ObjFile =
       dyn_cast<ELF32LEObjectFile>(MR->getObjectFile());
@@ -365,7 +365,7 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(int64_t MCInstO
       }
     }
   } else {
-    // If can not find the corresponding symbol.
+    // If we can not find the corresponding symbol.
     GlobVal = TargetMR->getRODataValueAt(Offset);
     if (GlobVal == nullptr) {
       uint64_t Index = Offset - TextSecAddr;

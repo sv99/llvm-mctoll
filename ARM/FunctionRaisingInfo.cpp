@@ -64,16 +64,6 @@ void FunctionRaisingInfo::clear() {
 }
 
 /// Get the corresponding BasicBlock of given MachineBasicBlock.
-BasicBlock *FunctionRaisingInfo::getBasicBlock(MachineBasicBlock &MBB) {
-  for (auto Block : MBBMap) {
-    if (Block.second == &MBB)
-      return const_cast<BasicBlock *>(Block.first);
-  }
-
-  return nullptr;
-}
-
-/// Get the corresponding BasicBlock of given MachineBasicBlock.
 /// If does not give a MachineBasicBlock, it will create a new BasicBlock
 /// on current Function, and returns it.
 BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
@@ -81,10 +71,12 @@ BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
   if (MBB == nullptr)
     return BasicBlock::Create(Fn->getContext(), "", Fn);
 
-  BasicBlock *Block = getBasicBlock(*MBB);
-  if (Block != nullptr)
-    return Block;
+  for (auto Block : MBBMap) {
+    if (Block.second == MBB)
+      return const_cast<BasicBlock *>(Block.first);
+  }
 
+  BasicBlock *Block = nullptr;
   if (&MF->front() == MBB)
     Block = &Fn->getEntryBlock();
   else

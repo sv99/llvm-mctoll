@@ -192,8 +192,7 @@ private:
   // instruction code selection functions
 
   /// Instruction opcode selection.
-  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, SDNode *N);
-  // bool getAddressModule(SDNode *Node);
+  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *N);
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
   /// Record the new defined Node, it uses to map the register number to Node.
@@ -212,7 +211,7 @@ private:
   /// Analyzes CPSR register information of MI to collect conditional
   /// code properties.
   void visitCC(FunctionRaisingInfo *FuncInfo,
-               const MachineInstr &MI, MachineSDNode *MNode);
+               const MachineInstr &MI, SDNode *Node);
 
   // IR emitter
 

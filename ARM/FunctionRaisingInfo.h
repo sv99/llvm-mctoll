@@ -100,9 +100,6 @@ public:
   void clear();
   /// Get current raised llvm::Function.
   Function *getCRF() { return const_cast<Function *>(Fn); }
-  /// Get the corresponding BasicBlock of given
-  /// MachineBasicBlock.
-  BasicBlock *getBasicBlock(MachineBasicBlock &MBB);
   /// Get the corresponding BasicBlock of given MachineBasicBlock. If does not
   /// give a MachineBasicBlock, it will create a new BasicBlock on current
   /// Function, and returns it.

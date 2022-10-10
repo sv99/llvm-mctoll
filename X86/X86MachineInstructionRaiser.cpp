@@ -4899,7 +4899,7 @@ bool X86MachineInstructionRaiser::raiseDirectBranchMachineInstr(
   return true;
 }
 
-// Raise a generic instruction. This is the catch all MachineInstr raiser
+// Raise a generic instruction. This is catch all the MachineInstr raiser
 bool X86MachineInstructionRaiser::raiseGenericMachineInstr(
     const MachineInstr &MI) {
   unsigned int Opcode = MI.getOpcode();

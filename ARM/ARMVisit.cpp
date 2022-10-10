@@ -124,8 +124,8 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
 /// code properties.
 void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
                                           const MachineInstr &MI,
-                                          MachineSDNode *MNode) {
-  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[MNode];
+                                          SDNode *Node) {
+  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[Node];
   // Initialize the NodePropertyInfo properties.
   NodeInfo.HasCPSR = false;
   NodeInfo.Special = false;

@@ -97,8 +97,8 @@ EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
 }
 
 /// Instruction opcode selection.
-SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
-                                                SDNode *N) {
+SDNode *ARMMachineInstructionRaiser::selectCode(
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *N) {
   auto *CurDAG = &FuncInfo->getCurDAG();
   SDLoc Dl(N);
   SDNode *Node = nullptr;
@@ -936,6 +936,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
                  .getNode();
     }
     recordDefinition(FuncInfo, Rd.getNode(), Node);
+    // emit
   } break;
   /* CLZ */
   case ARM::CLZ:
