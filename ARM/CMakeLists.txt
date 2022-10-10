@@ -3,7 +3,6 @@ include_directories(
   ${LLVM_BINARY_DIR}/lib/Target/ARM
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/.
-#  ${CMAKE_CURRENT_SOURCE_DIR}/DAG
 )
 
 if(NOT LLVM_MCTOLL_BUILT_STANDALONE)
@@ -20,12 +19,11 @@ add_llvm_library(mctollARMRaiser
   ARMFrameBuilder.cpp
   ARMInstructionSplitting.cpp
   ARMInstSelector.cpp
-  DAG/FunctionRaisingInfo.cpp
-  DAG/DAGRaisingInfo.cpp
-  DAG/IREmitter.cpp
+  FunctionRaisingInfo.cpp
   ARMSelectionDAGISel.cpp
   ARMMachineInstructionRaiser.cpp
   ARMVisit.cpp
+  ARMIREmitter.cpp
 
   LINK_COMPONENTS
   Analysis

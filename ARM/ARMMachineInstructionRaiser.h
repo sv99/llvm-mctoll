@@ -29,7 +29,6 @@ namespace mctoll {
 // Forward declaration
 class ARMModuleRaiser;
 class FunctionRaisingInfo;
-class DAGRaisingInfo;
 
 // Type alias for Map of MBBNo -> BasicBlock * used to keep track of
 // MachineBasicBlock and corresponding raised BasicBlock
@@ -67,7 +66,7 @@ private:
   Function *discoverPrototype(MachineFunction &MF);
   /// Get default Int type.
   Type *getDefaultType() {
-    return Type::getIntNTy(Ctx, MF.getDataLayout().getPointerSizeInBits());
+    return Type::getIntNTy(Ctx, M->getDataLayout().getPointerSizeInBits());
   };
   /// Check the first reference of the reg is USE.
   bool isUsedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
@@ -187,17 +186,13 @@ private:
   // step 7: select instruction (without intermediate SelectionDAG state)
   bool doSelection();
   void initEntryBasicBlock(FunctionRaisingInfo *FuncInfo);
-  void selectBasicBlock(FunctionRaisingInfo *FuncInfo,
-                        DAGRaisingInfo *DAGInfo,
-                        MachineBasicBlock *MBB);
+  void selectBasicBlock(FunctionRaisingInfo *FuncInfo, MachineBasicBlock *MBB);
   void dumpDAG(SelectionDAG *CurDAG);
 
   // instruction code selection functions
 
   /// Instruction opcode selection.
-  SDNode *selectCode(FunctionRaisingInfo *FuncInfo,
-                     DAGRaisingInfo *DAGInfo,
-                     SDNode *N);
+  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, SDNode *N);
   // bool getAddressModule(SDNode *Node);
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
@@ -206,19 +201,74 @@ private:
   void recordDefinition(FunctionRaisingInfo *FuncInfo,
                         SDNode *OldNode, SDNode *NewNode);
   /// Replace all uses of F with T, then remove F from the DAG.
-  void replaceNode(DAGRaisingInfo *DAGInfo, SDNode *F, SDNode *T);
-  bool isTwoAddressMode(DAGRaisingInfo *DAGInfo, SDNode *Node);
+  void replaceNode(FunctionRaisingInfo *FuncInfo, SDNode *F, SDNode *T);
+  bool isTwoAddressMode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
   /// Checks the SDNode is a function return or not.
   bool isReturnNode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
 
   /// visit - Collects the information of each MI to create SDNodes.
   SDNode *visit(FunctionRaisingInfo *FuncInfo,
-                DAGRaisingInfo *DAGInfo,
                 const MachineInstr &MI);
   /// Analyzes CPSR register information of MI to collect conditional
   /// code properties.
-  void visitCC(DAGRaisingInfo *DAGInfo,
+  void visitCC(FunctionRaisingInfo *FuncInfo,
                const MachineInstr &MI, MachineSDNode *MNode);
+
+  // IR emitter
+
+  /// Emit Instruction and add to BasicBlock.
+  void emitInstr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, MachineInstr &MI);
+  /// Generate SDNode code for a target-independent node.
+  /// Emit SDNode to Instruction and add to BasicBlock.
+  void emitSDNode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node);
+  void emitSpecialNode(FunctionRaisingInfo *FuncInfo,
+                       BasicBlock *BB, SDNode *Node);
+
+  /// Emit SDNodes of binary operations.
+  void emitBinary(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node);
+  void emitCondCode(FunctionRaisingInfo *FuncInfo, unsigned CondValue,
+                    BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
+  void emitBinaryCPSR(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                      BasicBlock *BB, unsigned Opcode, SDNode *Node);
+  /// Update the N Z C V flags of global variable.
+  void emitCPSR(FunctionRaisingInfo *FuncInfo, Value *Operand0, Value *Operand1,
+                BasicBlock *BB, unsigned Flag);
+  void emitSpecialCPSR(FunctionRaisingInfo *FuncInfo,
+                       Value *Result, BasicBlock *BB, unsigned Flag);
+  /// Create PHINode for value use selection when running.
+  PHINode *createAndEmitPHINode(FunctionRaisingInfo *FuncInfo, SDNode *Node,
+                                BasicBlock *BB, BasicBlock *IfBB,
+                                BasicBlock *ElseBB, Instruction *IfInst);
+  PointerType *getPointerType() {
+    return Type::getIntNPtrTy(Ctx, MF.getDataLayout().getPointerSizeInBits());
+  }
+
+  Type *getIntTypeByPtr(Type *PTy);
+
+  Value *getIRValue(FunctionRaisingInfo *FuncInfo, SDValue Val);
+  // Wrapper to call new  Create*Load APIs
+  //  LoadInst *callCreateAlignedLoad(Value *ValPtr,
+  //                                  MaybeAlign Align = MaybeAlign()) {
+  //    return IRB.CreateAlignedLoad(ValPtr->getType()->getPointerElementType(),
+  //                                 ValPtr, Align, "");
+  //  }
+  LoadInst *callCreateAlignedLoad(BasicBlock *BB, Type *Ty, Value *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    IRBuilder<> IRB(BB);
+    return IRB.CreateAlignedLoad(Ty, ValPtr, Align, "");
+  }
+  LoadInst *callCreateAlignedLoad(BasicBlock *BB, AllocaInst *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    IRBuilder<> IRB(BB);
+    return IRB.CreateAlignedLoad(ValPtr->getAllocatedType(),
+                                 ValPtr, Align, "");
+  }
+  LoadInst *callCreateAlignedLoad(BasicBlock *BB, GlobalValue *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    IRBuilder<> IRB(BB);
+    return IRB.CreateAlignedLoad(ValPtr->getValueType(),
+                                 ValPtr, Align, "");
+  }
 
 };
 

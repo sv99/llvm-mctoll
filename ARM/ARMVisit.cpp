@@ -11,11 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "ARMSubtarget.h"
 #include "ARMMachineInstructionRaiser.h"
-#include "DAG/DAGRaisingInfo.h"
-#include "DAG/FunctionRaisingInfo.h"
-#include "DAG/SelectionCommon.h"
+#include "FunctionRaisingInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include <vector>
@@ -27,11 +24,10 @@ using namespace llvm::mctoll;
 
 /// Collects the information of each MI to create SDNodes.
 SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
-                                           DAGRaisingInfo *DAGInfo,
                                            const MachineInstr &MI) {
   std::vector<SDValue> VCtv;
   std::vector<EVT> VCtt;
-  auto *DAG = &DAGInfo->getCurDAG();
+  auto *DAG = &FuncInfo->getCurDAG();
 
   for (const MachineOperand MO : MI.operands()) {
 
@@ -53,7 +49,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
         AllocaInst *V = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
         EVT Evt = EVT::getEVT(V->getAllocatedType());
         SDValue Sdv = DAG->getFrameIndex(FI, Evt, false);
-        DAGInfo->setRealValue(Sdv.getNode(), V);
+        FuncInfo->setRealValue(Sdv.getNode(), V);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
       } else if (FuncInfo->isArgumentIndex(FI)) {
@@ -61,7 +57,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
             const_cast<Argument *>(FuncInfo->getCRF()->arg_begin() + (FI - 1));
         EVT Evt = EVT::getEVT(V->getType());
         SDValue Sdv = DAG->getFrameIndex(FI, Evt, false);
-        DAGInfo->setRealValue(Sdv.getNode(), V);
+        FuncInfo->setRealValue(Sdv.getNode(), V);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
       } else if (FuncInfo->isReturnIndex(FI)) {
@@ -83,7 +79,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
           FuncInfo->MR->getModule()->getNamedGlobal(MO.getSymbolName());
       EVT Evt = EVT::getEVT(V->getValueType(), true);
       SDValue Sdv = DAG->getExternalSymbol(MO.getSymbolName(), Evt);
-      DAGInfo->setRealValue(Sdv.getNode(), V);
+      FuncInfo->setRealValue(Sdv.getNode(), V);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else if (MO.isMetadata()) {
@@ -112,7 +108,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
 
   NodePropertyInfo *NPI = new NodePropertyInfo();
   NPI->MI = &MI;
-  DAGInfo->NPMap[MNode] = NPI;
+  FuncInfo->NPMap[MNode] = NPI;
 
   // TODO: Now the predicate operand not stripped, so the two-address operands
   // more than two.
@@ -120,16 +116,16 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
   if (VCtv.size() < 4)
     NPI->IsTwoAddress = true;
 
-  visitCC(DAGInfo, MI, MNode);
+  visitCC(FuncInfo, MI, MNode);
   return MNode;
 }
 
 /// Analyzes CPSR register information of MI to collect conditional
 /// code properties.
-void ARMMachineInstructionRaiser::visitCC(DAGRaisingInfo *DAGInfo,
+void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
                                           const MachineInstr &MI,
                                           MachineSDNode *MNode) {
-  NodePropertyInfo &NodeInfo = *DAGInfo->NPMap[MNode];
+  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[MNode];
   // Initialize the NodePropertyInfo properties.
   NodeInfo.HasCPSR = false;
   NodeInfo.Special = false;

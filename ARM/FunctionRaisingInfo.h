@@ -14,13 +14,55 @@
 #ifndef LLVM_TOOLS_LLVM_MCTOLL_ARM_DAG_FUNCTIONRAISERINGINFO_H
 #define LLVM_TOOLS_LLVM_MCTOLL_ARM_DAG_FUNCTIONRAISERINGINFO_H
 
+#include "ARMISelLowering.h"
 #include "ARMModuleRaiser.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/FunctionLoweringInfo.h"
+#include "llvm/CodeGen/ISDOpcodes.h"
 #include "llvm/CodeGen/SelectionDAGNodes.h"
+
+/// This is the start index of EXT_ARMISD. Because node types which start
+/// from ARMISD::VLD1DUP (Next to ARMISD::MEMCPY) are identified as
+/// TARGET_MEMORY_OPCODE, we set EXTARMISD_OP_BEGIN index after ARMISD::MEMCPY,
+/// plugs 40 to keep long time with no confliction.
+#define EXTARMISD_OP_BEGIN (ARMISD::MEMCPY + 40)
 
 namespace llvm {
 namespace mctoll {
+
+namespace EXT_ARMISD {
+
+enum NodeType {
+  BX_RET = EXTARMISD_OP_BEGIN,
+  BRD, // Direct branch
+  LOAD,
+  STORE,
+  MSR,
+  MRS,
+  RSB,
+  RSC,
+  SBC,
+  TEQ,
+  TST,
+  BIC,
+  MLA,
+  UXTB,
+  EXT_ARMISD_OP_END
+};
+
+} // namespace EXT_ARMISD
+
+/// This structure is to extend SDNode properties, some additional SDNode
+/// properties which are used by llvm-mctoll will be kept at here.
+typedef struct {
+  bool HasCPSR;
+  bool Special;
+  bool UpdateCPSR;
+  unsigned Cond;
+  bool IsTwoAddress;
+  Value *Val;
+  const MachineInstr *MI;
+} NodePropertyInfo;
 
 /// This contains information that is global to a function that is used when
 /// raising a region of the function.
@@ -51,7 +93,7 @@ public:
   /// Initialize this FunctionRaisingInfo with the given Function and its
   /// associated MachineFunction.
   void set(ARMModuleRaiser &MRVal, Function &FNVal, MachineFunction &MFVal,
-           SelectionDAG *DAGVal);
+           SelectionDAG &DAGVal);
   /// Clear out all the function-specific state. This returns this
   /// FunctionRasisingInfo to an empty state, ready to be used for a
   /// different function.
@@ -84,6 +126,18 @@ public:
   LLVMContext *CTX;
   const DataLayout *DLT;
   Type *DefaultType;
+
+  /// The map for each SDNode with its additional property.
+  DenseMap<SDNode *, NodePropertyInfo *> NPMap;
+  /// Gets corresponding SelectionDAG object.
+  SelectionDAG &getCurDAG() { return *DAG; }
+  /// Gets the related IR Value of given SDNode.
+  Value *getRealValue(SDNode *Node);
+  /// Set the related IR Value to SDNode.
+  void setRealValue(SDNode *N, Value *V);
+
+private:
+  SelectionDAG *DAG;
 };
 
 } // end namespace mctoll

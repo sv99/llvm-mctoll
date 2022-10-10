@@ -12,10 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMMachineInstructionRaiser.h"
-#include "DAG/DAGRaisingInfo.h"
-#include "DAG/FunctionRaisingInfo.h"
-#include "DAG/IREmitter.h"
-#include "Raiser/ModuleRaiser.h"
+#include "FunctionRaisingInfo.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 
 #define DEBUG_TYPE "mctoll"
@@ -42,14 +39,13 @@ bool ARMMachineInstructionRaiser::doSelection() {
   auto ORE = make_unique<OptimizationRemarkEmitter>(RaisedFunction);
   CurDAG->init(MF, *ORE.get(), nullptr, nullptr, nullptr, nullptr, nullptr);
   FunctionRaisingInfo *FuncInfo = new FunctionRaisingInfo();
-  FuncInfo->set(*TargetMR, *getRaisedFunction(), MF, CurDAG);
-  auto *DAGInfo = new DAGRaisingInfo(*CurDAG);
+  FuncInfo->set(*TargetMR, *getRaisedFunction(), MF, *CurDAG);
 
   initEntryBasicBlock(FuncInfo);
   for (MachineBasicBlock &Block : MF) {
     // MBB = &Block;
     FuncInfo->getOrCreateBasicBlock(&Block);
-    selectBasicBlock(FuncInfo, DAGInfo, &Block);
+    selectBasicBlock(FuncInfo, &Block);
   }
 
   // Add an additional exit BasicBlock, all of original return BasicBlocks
@@ -188,23 +184,16 @@ LLVM_DUMP_METHOD void ARMMachineInstructionRaiser::dumpDAG(SelectionDAG *CurDAG)
 }
 #endif
 
-void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo,
-                                                   DAGRaisingInfo *DAGInfo,
-                                                   MachineBasicBlock *MBB) {
+void ARMMachineInstructionRaiser::selectBasicBlock(
+    FunctionRaisingInfo *FuncInfo, MachineBasicBlock *MBB) {
 
   auto *BB = FuncInfo->getBasicBlock(*MBB);
-  IREmitter Imt(BB, DAGInfo, FuncInfo);
-  Imt.setjtList(JTList);
+  auto *CurDAG = &FuncInfo->getCurDAG();
 
   for (MachineInstr &MI : MBB->instrs()) {
-    SDNode *Node = visit(FuncInfo, DAGInfo, MI);
-    SDNode *SelNode = selectCode(FuncInfo, DAGInfo, Node);
-    if (SelNode) {
-      Imt.emitSDNode(SelNode);
-    }
+    emitInstr(FuncInfo, BB, MI);
   }
 
-  auto *CurDAG = &DAGInfo->getCurDAG();
   LLVM_DEBUG(dbgs() << "DUG after start.\n");
   LLVM_DEBUG(dumpDAG(CurDAG));
   LLVM_DEBUG(dbgs() << "DUG after end.\n");
@@ -215,7 +204,7 @@ void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo
   Type *RTy = FuncInfo->Fn->getReturnType();
   if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
     auto *Reg = FuncInfo->RegValMap[ARM::R0];
-    auto *Val = DAGInfo->getRealValue(Reg);
+    auto *Val = FuncInfo->getRealValue(Reg);
     Instruction *TInst = dyn_cast<Instruction>(Val);
     assert(TInst && "A def R0 was pointed to a non-instruction!!!");
     BasicBlock *TBB = TInst->getParent();
@@ -223,7 +212,6 @@ void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo
   }
 
   // Free the SelectionDAG state, now that we're finished with it.
-  DAGInfo->clear();
   CurDAG->clear();
 }
 

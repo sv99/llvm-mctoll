@@ -19,12 +19,14 @@ using namespace llvm::mctoll;
 
 /// Initialize this FunctionRaisingInfo with the given Function and its
 /// associated MachineFunction.
-void FunctionRaisingInfo::set(ARMModuleRaiser &MRVal, Function &FNVal,
-                              MachineFunction &MFVal, SelectionDAG *DAG) {
+void FunctionRaisingInfo::set(
+    ARMModuleRaiser &MRVal, Function &FNVal, MachineFunction &MFVal,
+    SelectionDAG &DAGVal) {
   MR = &MRVal;
   Fn = &FNVal;
   MF = &MFVal;
-  CTX = DAG->getContext();
+  DAG = &DAGVal;
+  CTX = &MR->getModule()->getContext();
   DLT = &MR->getModule()->getDataLayout();
 
   DefaultType = Type::getIntNTy(*CTX, DLT->getPointerSizeInBits());
@@ -58,6 +60,7 @@ void FunctionRaisingInfo::clear() {
   NodeRegMap.clear();
   AllocaMap.clear();
   RetValMap.clear();
+  NPMap.clear();
 }
 
 /// Get the corresponding BasicBlock of given MachineBasicBlock.
@@ -90,4 +93,21 @@ BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
   MBBMap.insert(std::make_pair(Block, MBB));
 
   return Block;
+}
+
+/// Gets the related IR Value of given SDNode.
+Value *FunctionRaisingInfo::getRealValue(SDNode *Node) {
+  assert(Node != nullptr && "Node cannot be nullptr!");
+  assert(NPMap[Node] != nullptr &&
+         "Cannot find the corresponding node property!");
+  return NPMap[Node]->Val;
+}
+
+/// Set the related IR Value to SDNode.
+void FunctionRaisingInfo::setRealValue(SDNode *N, Value *V) {
+  if (NPMap.count(N) == 0)
+    NPMap[N] = new NodePropertyInfo();
+  if (!NPMap[N])
+    NPMap[N] = new NodePropertyInfo();
+  NPMap[N]->Val = V;
 }

@@ -13,21 +13,19 @@
 
 #include "ARM.h"
 #include "ARMMachineInstructionRaiser.h"
-#include "ARMSubtarget.h"
-#include "DAG/DAGRaisingInfo.h"
-#include "DAG/FunctionRaisingInfo.h"
+#include "FunctionRaisingInfo.h"
 
 using namespace llvm;
 using namespace llvm::mctoll;
 
 /// Replace all uses of F with T, then remove F from the DAG.
-void ARMMachineInstructionRaiser::replaceNode(DAGRaisingInfo *DAGInfo,
+void ARMMachineInstructionRaiser::replaceNode(FunctionRaisingInfo *FuncInfo,
                                               SDNode *F, SDNode *T) {
-  auto *CurDAG = &DAGInfo->getCurDAG();
+  auto *CurDAG = &FuncInfo->getCurDAG();
   if (MachineSDNode::classof(F)) {
-    NodePropertyInfo *NP = DAGInfo->NPMap[F];
-    DAGInfo->NPMap.erase(F);
-    DAGInfo->NPMap[T] = NP;
+    NodePropertyInfo *NP = FuncInfo->NPMap[F];
+    FuncInfo->NPMap.erase(F);
+    FuncInfo->NPMap[T] = NP;
   }
 
   CurDAG->ReplaceAllUsesWith(F, T);
@@ -80,12 +78,12 @@ SDValue ARMMachineInstructionRaiser::getMDOperand(SDNode *N) {
 }
 
 /// Gets the Metadata of given SDNode.
-bool ARMMachineInstructionRaiser::isTwoAddressMode(DAGRaisingInfo *DAGInfo,
-                                                   SDNode *Node) {
+bool ARMMachineInstructionRaiser::isTwoAddressMode(
+    FunctionRaisingInfo *FuncInfo, SDNode *Node) {
   if (nullptr == Node)
     return false;
 
-  NodePropertyInfo *NPI = DAGInfo->NPMap[Node];
+  NodePropertyInfo *NPI = FuncInfo->NPMap[Node];
 
   if (nullptr == NPI)
     return false;
@@ -100,9 +98,8 @@ EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
 
 /// Instruction opcode selection.
 SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
-                                                DAGRaisingInfo *DAGInfo,
                                                 SDNode *N) {
-  auto *CurDAG = &DAGInfo->getCurDAG();
+  auto *CurDAG = &FuncInfo->getCurDAG();
   SDLoc Dl(N);
   SDNode *Node = nullptr;
 
@@ -120,7 +117,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
   case ARM::t2ADCrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       // ADCS <Rdn>,<Rm>
       // ADC<c> <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
@@ -175,7 +172,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
                            getMDOperand(N))
                  .getNode();
     } else {
-      if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+      if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
         if (RegisterSDNode::classof(N->getOperand(1).getNode()))
           Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -215,7 +212,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
   case ARM::t2SUBS_PC_LR: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -422,7 +419,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Iftrue = N->getOperand(0);
     SDValue Cond = N->getOperand(1);
 
-    if (DAGInfo->NPMap[N]->HasCPSR)
+    if (FuncInfo->NPMap[N]->HasCPSR)
       Node = CurDAG
                  ->getNode(ISD::BRCOND, Dl, getDefaultEVT(FuncInfo), Iftrue,
                            Cond, getMDOperand(N))
@@ -433,7 +430,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
                            getMDOperand(N))
                  .getNode();
 
-    const MachineBasicBlock *LMBB = DAGInfo->NPMap[N]->MI->getParent();
+    const MachineBasicBlock *LMBB = FuncInfo->NPMap[N]->MI->getParent();
     if (LMBB->succ_size() == 0) {
       FuncInfo->setValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->NodeRegMap[Node] = ARM::R0;
@@ -554,7 +551,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       // AND<c> <Rdn>,<Rm>
       // ANDS <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
@@ -593,7 +590,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -648,7 +645,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       // EORS <Rdn>,<Rm>
       // EOR<c> <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
@@ -747,7 +744,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -779,7 +776,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -813,7 +810,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rn = N->getOperand(1);
 
     // <opcode>   {<cond>}{s}<Rd>，<Rn>{，<OP2>}
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -844,7 +841,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -889,7 +886,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
@@ -919,7 +916,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -1022,7 +1019,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
 
-    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
+    if (isTwoAddressMode(FuncInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
@@ -1156,7 +1153,7 @@ SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
   }
 
   if (Node) {
-    replaceNode(DAGInfo, N, Node);
+    replaceNode(FuncInfo, N, Node);
   }
   return Node;
 }
