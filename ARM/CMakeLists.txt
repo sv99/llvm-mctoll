@@ -19,13 +19,13 @@ add_llvm_library(mctollARMRaiser
   ARMArgumentRaiser.cpp
   ARMFrameBuilder.cpp
   ARMInstructionSplitting.cpp
+  ARMInstSelector.cpp
   DAG/FunctionRaisingInfo.cpp
   DAG/DAGRaisingInfo.cpp
-  DAG/DAGBuilder.cpp
-  DAG/InstSelector.cpp
   DAG/IREmitter.cpp
   ARMSelectionDAGISel.cpp
   ARMMachineInstructionRaiser.cpp
+  ARMVisit.cpp
 
   LINK_COMPONENTS
   Analysis

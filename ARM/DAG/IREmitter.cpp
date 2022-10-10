@@ -689,8 +689,6 @@ void IREmitter::emitSpecialNode(SDNode *Node) {
   unsigned Opc = Node->getOpcode();
   Module &M = *MR->getModule();
 
-  BasicBlock *BB = getBlock();
-  BasicBlock *CurBB = getCurBlock();
   switch (Opc) {
   default:
     // assert(false && "Unknown SDNode Type!");

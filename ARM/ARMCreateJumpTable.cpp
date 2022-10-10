@@ -292,7 +292,6 @@ bool ARMMachineInstructionRaiser::raiseMachineJumpTable(MachineFunction &MF) {
 
         // The new machine instrucion should contain the metadata.
         // Create the metadata and add it to the machine instrucion.
-        LLVMContext &Ctx(MF.getFunction().getContext());
         ConstantAsMetadata *CAM = ConstantAsMetadata::get(
             ConstantInt::get(Ctx, llvm::APInt(64, 0, false)));
         MDNode *MDnode = MDNode::get(Ctx, CAM);

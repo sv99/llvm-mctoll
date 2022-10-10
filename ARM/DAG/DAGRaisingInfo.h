@@ -38,6 +38,24 @@ public:
   SelectionDAG &DAG;
   /// The map for each SDNode with its additional property.
   DenseMap<SDNode *, NodePropertyInfo *> NPMap;
+
+  void nodeEmitted(SDNode* Node) {
+    EmittedNodes.push_back(Node);
+  }
+  bool isNodeEmitted(SDNode* Node) {
+    return std::find(EmittedNodes.begin(),
+                     EmittedNodes.end(), Node) != EmittedNodes.end();
+  }
+  void nodeSelected(SDNode* Node) {
+    if (Node)
+      SelectedNodes.push_back(Node);
+  }
+  auto getSelectedNodes() { return SelectedNodes; }
+private:
+  /// Emitted nodes
+  std::vector<SDNode *> EmittedNodes;
+  /// Selected nodes
+  std::vector<SDNode *> SelectedNodes;
 };
 
 } // end namespace mctoll

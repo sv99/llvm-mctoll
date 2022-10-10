@@ -12,8 +12,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMSubtarget.h"
-#include "DAGBuilder.h"
-#include "SelectionCommon.h"
+#include "ARMMachineInstructionRaiser.h"
+#include "DAG/DAGRaisingInfo.h"
+#include "DAG/FunctionRaisingInfo.h"
+#include "DAG/SelectionCommon.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include <vector>
@@ -21,45 +23,50 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
+#define DEBUG_TYPE "mctoll"
+
 /// Collects the information of each MI to create SDNodes.
-void DAGBuilder::visit(const MachineInstr &MI) {
+SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
+                                           DAGRaisingInfo *DAGInfo,
+                                           const MachineInstr &MI) {
   std::vector<SDValue> VCtv;
   std::vector<EVT> VCtt;
+  auto *DAG = &DAGInfo->getCurDAG();
 
   for (const MachineOperand MO : MI.operands()) {
 
     if (MO.isReg() && !MO.isDebug()) {
-      EVT Evt = EVT::getEVT(FuncInfo.getDefaultType());
-      SDValue Sdv = DAG.getRegister(MO.getReg(), Evt);
+      EVT Evt = EVT::getEVT(FuncInfo->getDefaultType());
+      SDValue Sdv = DAG->getRegister(MO.getReg(), Evt);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else if (MO.isImm()) {
-      EVT Evt = FuncInfo.getDefaultEVT();
-      SDValue Sdv = DAG.getConstant(MO.getImm(), SDLoc(nullptr, 0), Evt);
+      EVT Evt = FuncInfo->getDefaultEVT();
+      SDValue Sdv = DAG->getConstant(MO.getImm(), SDLoc(nullptr, 0), Evt);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else if (MO.isFI()) {
       // Frame index
       int FI = MO.getIndex();
-      if (FuncInfo.isStackIndex(FI)) {
+      if (FuncInfo->isStackIndex(FI)) {
         const MachineFrameInfo &MFI = MI.getMF()->getFrameInfo();
         AllocaInst *V = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
         EVT Evt = EVT::getEVT(V->getAllocatedType());
-        SDValue Sdv = DAG.getFrameIndex(FI, Evt, false);
-        DAGInfo.setRealValue(Sdv.getNode(), V);
+        SDValue Sdv = DAG->getFrameIndex(FI, Evt, false);
+        DAGInfo->setRealValue(Sdv.getNode(), V);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
-      } else if (FuncInfo.isArgumentIndex(FI)) {
+      } else if (FuncInfo->isArgumentIndex(FI)) {
         Argument *V =
-            const_cast<Argument *>(FuncInfo.getCRF()->arg_begin() + (FI - 1));
+            const_cast<Argument *>(FuncInfo->getCRF()->arg_begin() + (FI - 1));
         EVT Evt = EVT::getEVT(V->getType());
-        SDValue Sdv = DAG.getFrameIndex(FI, Evt, false);
-        DAGInfo.setRealValue(Sdv.getNode(), V);
+        SDValue Sdv = DAG->getFrameIndex(FI, Evt, false);
+        DAGInfo->setRealValue(Sdv.getNode(), V);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
-      } else if (FuncInfo.isReturnIndex(FI)) {
-        EVT Evt = EVT::getEVT(FuncInfo.getCRF()->getReturnType());
-        SDValue Sdv = DAG.getFrameIndex(0, Evt, false);
+      } else if (FuncInfo->isReturnIndex(FI)) {
+        EVT Evt = EVT::getEVT(FuncInfo->getCRF()->getReturnType());
+        SDValue Sdv = DAG->getFrameIndex(0, Evt, false);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
       } else {
@@ -67,23 +74,23 @@ void DAGBuilder::visit(const MachineInstr &MI) {
       }
     } else if (MO.isJTI()) {
       // Jump table index
-      EVT Evt = EVT::getEVT(FuncInfo.getDefaultType());
-      SDValue Sdv = DAG.getConstant(MO.getIndex(), SDLoc(nullptr, 0), Evt);
+      EVT Evt = EVT::getEVT(FuncInfo->getDefaultType());
+      SDValue Sdv = DAG->getConstant(MO.getIndex(), SDLoc(nullptr, 0), Evt);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else if (MO.isSymbol()) {
       GlobalVariable *V =
-          FuncInfo.MR->getModule()->getNamedGlobal(MO.getSymbolName());
+          FuncInfo->MR->getModule()->getNamedGlobal(MO.getSymbolName());
       EVT Evt = EVT::getEVT(V->getValueType(), true);
-      SDValue Sdv = DAG.getExternalSymbol(MO.getSymbolName(), Evt);
-      DAGInfo.setRealValue(Sdv.getNode(), V);
+      SDValue Sdv = DAG->getExternalSymbol(MO.getSymbolName(), Evt);
+      DAGInfo->setRealValue(Sdv.getNode(), V);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else if (MO.isMetadata()) {
       const MDNode *MD = MO.getMetadata();
-      Type *Ty = Type::getInt64Ty(FuncInfo.getCRF()->getContext());
+      Type *Ty = Type::getInt64Ty(FuncInfo->getCRF()->getContext());
       EVT Evt = EVT::getEVT(Ty);
-      SDValue Sdv = DAG.getMDNode(MD);
+      SDValue Sdv = DAG->getMDNode(MD);
       VCtv.push_back(Sdv);
       VCtt.push_back(Evt);
     } else {
@@ -101,11 +108,11 @@ void DAGBuilder::visit(const MachineInstr &MI) {
 
   SDLoc Sdl(nullptr, 0);
   MachineSDNode *MNode =
-      DAG.getMachineNode(MI.getOpcode(), Sdl, DAG.getVTList(VTs), Ops);
+      DAG->getMachineNode(MI.getOpcode(), Sdl, DAG->getVTList(VTs), Ops);
 
   NodePropertyInfo *NPI = new NodePropertyInfo();
   NPI->MI = &MI;
-  DAGInfo.NPMap[MNode] = NPI;
+  DAGInfo->NPMap[MNode] = NPI;
 
   // TODO: Now the predicate operand not stripped, so the two-address operands
   // more than two.
@@ -113,13 +120,16 @@ void DAGBuilder::visit(const MachineInstr &MI) {
   if (VCtv.size() < 4)
     NPI->IsTwoAddress = true;
 
-  visitCC(MI, MNode);
+  visitCC(DAGInfo, MI, MNode);
+  return MNode;
 }
 
 /// Analyzes CPSR register information of MI to collect conditional
 /// code properties.
-void DAGBuilder::visitCC(const MachineInstr &MI, MachineSDNode *MNode) {
-  NodePropertyInfo &NodeInfo = *DAGInfo.NPMap[MNode];
+void ARMMachineInstructionRaiser::visitCC(DAGRaisingInfo *DAGInfo,
+                                          const MachineInstr &MI,
+                                          MachineSDNode *MNode) {
+  NodePropertyInfo &NodeInfo = *DAGInfo->NPMap[MNode];
   // Initialize the NodePropertyInfo properties.
   NodeInfo.HasCPSR = false;
   NodeInfo.Special = false;
@@ -171,3 +181,5 @@ void DAGBuilder::visitCC(const MachineInstr &MI, MachineSDNode *MNode) {
     NodeInfo.HasCPSR = true;
   }
 }
+
+#undef DEBUG_TYPE

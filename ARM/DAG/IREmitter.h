@@ -49,10 +49,15 @@ public:
     else
       emitSpecialNode(Node);
   }
+  /// Generate SDNode code for a target-independent node.
+  /// Emit SDNode to Instruction and add to BasicBlock.
+  void emitSDNode(SDNode *Node);
+  void emitSpecialNode(SDNode *Node);
+
   BasicBlock *getBlock() { return BB; }
   void setBlock(BasicBlock *Block) { BB = Block; }
   /// Return the current basic block.
-  BasicBlock *getCurBlock() { return CurBB; }
+  //BasicBlock *getCurBlock() { return CurBB; }
 
   bool setjtList(std::vector<JumpTableInfo> &List) {
     JTList = List;
@@ -60,12 +65,8 @@ public:
   }
 
 private:
-  /// Generate SDNode code for a target-independent node.
-  /// Emit SDNode to Instruction and add to BasicBlock.
-  void emitSDNode(SDNode *Node);
   /// Emit SDNodes of binary operations.
   void emitBinary(SDNode *Node);
-  void emitSpecialNode(SDNode *Node);
   void emitCondCode(unsigned CondValue, BasicBlock *BB, BasicBlock *IfBB,
                     BasicBlock *ElseBB);
   void emitBinaryCPSR(Value *Inst, BasicBlock *BB, unsigned Opcode,

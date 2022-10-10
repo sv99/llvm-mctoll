@@ -30,7 +30,8 @@ Value *DAGRaisingInfo::getRealValue(SDNode *Node) {
 void DAGRaisingInfo::setRealValue(SDNode *N, Value *V) {
   if (NPMap.count(N) == 0)
     NPMap[N] = new NodePropertyInfo();
-
+  if (!NPMap[N])
+    NPMap[N] = new NodePropertyInfo();
   NPMap[N]->Val = V;
 }
 
@@ -39,4 +40,5 @@ void DAGRaisingInfo::clear() {
     delete Elm.second;
 
   NPMap.clear();
+  EmittedNodes.clear();
 }

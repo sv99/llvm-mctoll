@@ -64,17 +64,17 @@ private:
   MBBNumToBBMap MbbToBBMap;
 
   /// Discover machine function prototype.
-  Function *discoverPrototype(MachineFunction &mf);
+  Function *discoverPrototype(MachineFunction &MF);
   /// Get default Int type.
   Type *getDefaultType() {
     return Type::getIntNTy(Ctx, MF.getDataLayout().getPointerSizeInBits());
   };
   /// Check the first reference of the reg is USE.
-  bool isUsedRegiser(unsigned reg, const MachineBasicBlock &mbb);
+  bool isUsedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
   /// Check the first reference of the reg is DEF.
-  bool isDefinedRegiser(unsigned reg, const MachineBasicBlock &mbb);
+  bool isDefinedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
   /// Get all arguments types of current MachineFunction.
-  void genParameterTypes(std::vector<Type *> &paramTypes);
+  void genParameterTypes(std::vector<Type *> &ParamTypes);
   /// Get return type of current MachineFunction.
   Type *genReturnType();
 
@@ -128,7 +128,7 @@ private:
   void updateParameterInstr(MachineFunction &MF);
   /// Move arguments which are passed by ARM registers(R0 - R3) from function
   /// arg.x to corresponding registers in entry block.
-  void moveArgumentToRegister(unsigned Reg, MachineBasicBlock &PMBB);
+  void moveArgumentToRegister(unsigned Reg, MachineBasicBlock &MBB);
 
   struct StackElement {
     uint64_t Size;
@@ -191,6 +191,34 @@ private:
                         DAGRaisingInfo *DAGInfo,
                         MachineBasicBlock *MBB);
   void dumpDAG(SelectionDAG *CurDAG);
+
+  // instruction code selection functions
+
+  /// Instruction opcode selection.
+  SDNode *selectCode(FunctionRaisingInfo *FuncInfo,
+                     DAGRaisingInfo *DAGInfo,
+                     SDNode *N);
+  // bool getAddressModule(SDNode *Node);
+  /// Gets the Metadata of given SDNode.
+  SDValue getMDOperand(SDNode *N);
+  /// Record the new defined Node, it uses to map the register number to Node.
+  /// In DAG emitter, emitter get a value of use base on this defined Node.
+  void recordDefinition(FunctionRaisingInfo *FuncInfo,
+                        SDNode *OldNode, SDNode *NewNode);
+  /// Replace all uses of F with T, then remove F from the DAG.
+  void replaceNode(DAGRaisingInfo *DAGInfo, SDNode *F, SDNode *T);
+  bool isTwoAddressMode(DAGRaisingInfo *DAGInfo, SDNode *Node);
+  /// Checks the SDNode is a function return or not.
+  bool isReturnNode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
+
+  /// visit - Collects the information of each MI to create SDNodes.
+  SDNode *visit(FunctionRaisingInfo *FuncInfo,
+                DAGRaisingInfo *DAGInfo,
+                const MachineInstr &MI);
+  /// Analyzes CPSR register information of MI to collect conditional
+  /// code properties.
+  void visitCC(DAGRaisingInfo *DAGInfo,
+               const MachineInstr &MI, MachineSDNode *MNode);
 
 };
 

@@ -11,16 +11,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "InstSelector.h"
 #include "ARM.h"
+#include "ARMMachineInstructionRaiser.h"
 #include "ARMSubtarget.h"
-#include "SelectionCommon.h"
+#include "DAG/DAGRaisingInfo.h"
+#include "DAG/FunctionRaisingInfo.h"
 
 using namespace llvm;
 using namespace llvm::mctoll;
 
 /// Replace all uses of F with T, then remove F from the DAG.
-void InstSelector::replaceNode(SDNode *F, SDNode *T) {
+void ARMMachineInstructionRaiser::replaceNode(DAGRaisingInfo *DAGInfo,
+                                              SDNode *F, SDNode *T) {
+  auto *CurDAG = &DAGInfo->getCurDAG();
   if (MachineSDNode::classof(F)) {
     NodePropertyInfo *NP = DAGInfo->NPMap[F];
     DAGInfo->NPMap.erase(F);
@@ -31,17 +34,9 @@ void InstSelector::replaceNode(SDNode *F, SDNode *T) {
   CurDAG->RemoveDeadNode(F);
 }
 
-/// Checks the SDNode is a function argument or not.
-bool InstSelector::isArgumentNode(SDNode *Node) {
-  if (!FrameIndexSDNode::classof(Node))
-    return false;
-
-  return FuncInfo->isArgumentIndex(
-      dyn_cast<FrameIndexSDNode>(Node)->getIndex());
-}
-
 /// Checks the SDNode is a function return or not.
-bool InstSelector::isReturnNode(SDNode *Node) {
+bool ARMMachineInstructionRaiser::isReturnNode(FunctionRaisingInfo *FuncInfo,
+                                               SDNode *Node) {
   if (!FrameIndexSDNode::classof(Node))
     return false;
 
@@ -50,7 +45,8 @@ bool InstSelector::isReturnNode(SDNode *Node) {
 
 /// Record the new defined Node, it uses to map the register number to Node.
 /// In DAG emitter, emitter get a value of use base on this defined Node.
-void InstSelector::recordDefinition(SDNode *OldNode, SDNode *NewNode) {
+void ARMMachineInstructionRaiser::recordDefinition(
+    FunctionRaisingInfo *FuncInfo, SDNode *OldNode, SDNode *NewNode) {
   assert(NewNode != nullptr &&
          "The new SDNode ptr is null when record define!");
 
@@ -65,7 +61,7 @@ void InstSelector::recordDefinition(SDNode *OldNode, SDNode *NewNode) {
     FuncInfo->NodeRegMap[NewNode] = OpReg;
   }
 
-  if (isReturnNode(OldNode)) {
+  if (isReturnNode(FuncInfo, OldNode)) {
     FuncInfo->setRetValue(SDValue(NewNode, 0));
     FuncInfo->setValueByRegister(ARM::R0, SDValue(NewNode, 0));
     FuncInfo->NodeRegMap[NewNode] = ARM::R0;
@@ -73,7 +69,7 @@ void InstSelector::recordDefinition(SDNode *OldNode, SDNode *NewNode) {
 }
 
 /// Gets the Metadata of given SDNode.
-SDValue InstSelector::getMDOperand(SDNode *N) {
+SDValue ARMMachineInstructionRaiser::getMDOperand(SDNode *N) {
   for (auto &Sdv : N->ops()) {
     if (MDNodeSDNode::classof(Sdv.getNode())) {
       return Sdv.get();
@@ -83,9 +79,32 @@ SDValue InstSelector::getMDOperand(SDNode *N) {
   return SDValue();
 }
 
+/// Gets the Metadata of given SDNode.
+bool ARMMachineInstructionRaiser::isTwoAddressMode(DAGRaisingInfo *DAGInfo,
+                                                   SDNode *Node) {
+  if (nullptr == Node)
+    return false;
+
+  NodePropertyInfo *NPI = DAGInfo->NPMap[Node];
+
+  if (nullptr == NPI)
+    return false;
+  bool TWA = NPI->MI->getNumOperands() < 4;
+  assert(TWA != NPI->IsTwoAddress && "NPI->IsTwoAddress problems");
+  return NPI->IsTwoAddress;
+}
+
+EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
+  return EVT::getEVT(FuncInfo->getDefaultType());
+}
+
 /// Instruction opcode selection.
-void InstSelector::selectCode(SDNode *N) {
+SDNode *ARMMachineInstructionRaiser::selectCode(FunctionRaisingInfo *FuncInfo,
+                                                DAGRaisingInfo *DAGInfo,
+                                                SDNode *N) {
+  auto *CurDAG = &DAGInfo->getCurDAG();
   SDLoc Dl(N);
+  SDNode *Node = nullptr;
 
   switch (N->getMachineOpcode()) {
   default:
@@ -101,18 +120,17 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2ADCrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       // ADCS <Rdn>,<Rm>
       // ADC<c> <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::ADDC, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::ADDC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       // ADC{S}<c> <Rd>,<Rn>,#<const>
       SDValue Op2 = N->getOperand(2);
@@ -120,13 +138,12 @@ void InstSelector::selectCode(SDNode *N) {
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       Node = CurDAG
-                 ->getNode(ISD::ADDC, Dl, getDefaultEVT(), Rn, Op2,
+                 ->getNode(ISD::ADDC, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
                            getMDOperand(N))
                  .getNode();
     }
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* ADD */
   case ARM::ADDri:
@@ -152,20 +169,19 @@ void InstSelector::selectCode(SDNode *N) {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
     // <opcode>   {<cond>}{s}<Rd>，<Rn>{，<OP2>}
-    SDNode *Node = nullptr;
     if (FrameIndexSDNode::classof(N->getOperand(1).getNode())) {
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::LOAD, Dl, getDefaultEVT(), Rn,
+                 ->getNode(EXT_ARMISD::LOAD, Dl, getDefaultEVT(FuncInfo), Rn,
                            getMDOperand(N))
                  .getNode();
     } else {
-      if (isTwoAddressMode(Rd.getNode())) {
+      if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
         if (RegisterSDNode::classof(N->getOperand(1).getNode()))
           Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
         SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
         Node = CurDAG
-                   ->getNode(ISD::ADD, Dl, getDefaultEVT(), Rd, Rn,
+                   ->getNode(ISD::ADD, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                              getMDOperand(N))
                    .getNode();
       } else {
@@ -175,14 +191,13 @@ void InstSelector::selectCode(SDNode *N) {
 
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
         Node = CurDAG
-                   ->getNode(ISD::ADD, Dl, getDefaultEVT(), Rn, Op2,
+                   ->getNode(ISD::ADD, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
                              getMDOperand(N))
                    .getNode();
       }
     }
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* SUB */
   case ARM::SUBri:
@@ -200,29 +215,27 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2SUBS_PC_LR: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::SUB, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SUB, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::SUB, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SUB, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* MOV */
   case ARM::MOVi16:
@@ -243,13 +256,12 @@ void InstSelector::selectCode(SDNode *N) {
     if (RegisterSDNode::classof(Rn.getNode()))
       Rn = FuncInfo->getValFromRegMap(Rn);
 
-    SDNode *Node = CurDAG
-                       ->getNode(ARMISD::CMOV, Dl, getDefaultEVT(), Rn,
-                                 CurDAG->getConstant(0, Dl, getDefaultEVT()))
-                       .getNode();
+    Node = CurDAG
+               ->getNode(ARMISD::CMOV, Dl, getDefaultEVT(FuncInfo), Rn,
+                         CurDAG->getConstant(0, Dl, getDefaultEVT(FuncInfo)))
+               .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* STR */
   case ARM::STRi12:
@@ -275,11 +287,10 @@ void InstSelector::selectCode(SDNode *N) {
     if (RegisterSDNode::classof(Ptr.getNode()))
       Ptr = FuncInfo->getValFromRegMap(Ptr);
 
-    SDNode *Node = CurDAG
-                       ->getNode(EXT_ARMISD::STORE, Dl, getDefaultEVT(), Val,
-                                 Ptr, getMDOperand(N))
-                       .getNode();
-    replaceNode(N, Node);
+    Node = CurDAG
+               ->getNode(EXT_ARMISD::STORE, Dl, getDefaultEVT(FuncInfo), Val,
+                         Ptr, getMDOperand(N))
+               .getNode();
   } break;
   case ARM::STRH:
   case ARM::STRH_PRE:
@@ -287,7 +298,6 @@ void InstSelector::selectCode(SDNode *N) {
     EVT InstTy = EVT::getEVT(Type::getInt16Ty(*CurDAG->getContext()));
     SDValue Val = N->getOperand(0);
     SDValue Op1 = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(Val.getNode()))
       Val = FuncInfo->getValFromRegMap(Val);
@@ -309,7 +319,6 @@ void InstSelector::selectCode(SDNode *N) {
                  .getNode();
     }
 
-    replaceNode(N, Node);
   } break;
   case ARM::STRBi12:
   case ARM::STRBrs:
@@ -320,7 +329,6 @@ void InstSelector::selectCode(SDNode *N) {
     EVT InstTy = EVT::getEVT(Type::getInt8Ty(*CurDAG->getContext()));
     SDValue Val = N->getOperand(0);
     SDValue Op1 = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(Val.getNode()))
       Val = FuncInfo->getValFromRegMap(Val);
@@ -342,7 +350,6 @@ void InstSelector::selectCode(SDNode *N) {
                  .getNode();
     }
 
-    replaceNode(N, Node);
   } break;
   /* LDR */
   case ARM::LDRi12:
@@ -357,15 +364,14 @@ void InstSelector::selectCode(SDNode *N) {
     EVT InstTy = EVT::getEVT(Type::getInt32Ty(*CurDAG->getContext()));
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
+
     if (RegisterSDNode::classof(Rn.getNode()))
       Rn = FuncInfo->getValFromRegMap(Rn);
 
     Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   case ARM::LDRH:
   case ARM::LDRSH:
@@ -378,15 +384,13 @@ void InstSelector::selectCode(SDNode *N) {
     EVT InstTy = EVT::getEVT(Type::getInt16Ty(*CurDAG->getContext()));
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(Rn.getNode()))
       Rn = FuncInfo->getValFromRegMap(Rn);
     Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   case ARM::LDRBi12:
   case ARM::LDRBrs:
@@ -403,15 +407,13 @@ void InstSelector::selectCode(SDNode *N) {
     EVT InstTy = EVT::getEVT(Type::getInt8Ty(*CurDAG->getContext()));
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(Rn.getNode()))
       Rn = FuncInfo->getValFromRegMap(Rn);
     Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* Branch */
   case ARM::Bcc:
@@ -419,56 +421,54 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2Bcc: {
     SDValue Iftrue = N->getOperand(0);
     SDValue Cond = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (DAGInfo->NPMap[N]->HasCPSR)
       Node = CurDAG
-                 ->getNode(ISD::BRCOND, Dl, getDefaultEVT(), Iftrue, Cond,
-                           getMDOperand(N))
+                 ->getNode(ISD::BRCOND, Dl, getDefaultEVT(FuncInfo), Iftrue,
+                           Cond, getMDOperand(N))
                  .getNode();
     else
-      Node =
-          CurDAG->getNode(ISD::BR, Dl, getDefaultEVT(), Iftrue, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), Iftrue,
+                           getMDOperand(N))
+                 .getNode();
 
     const MachineBasicBlock *LMBB = DAGInfo->NPMap[N]->MI->getParent();
     if (LMBB->succ_size() == 0) {
       FuncInfo->setValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->NodeRegMap[Node] = ARM::R0;
     }
-    replaceNode(N, Node);
   } break;
   case ARM::B:
   case ARM::tB:
   case ARM::t2B: {
     SDValue BrBlock = N->getOperand(0);
-    SDNode *Node =
-        CurDAG->getNode(ISD::BR, Dl, getDefaultEVT(), BrBlock, getMDOperand(N))
-            .getNode();
+    Node = CurDAG
+               ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), BrBlock,
+                         getMDOperand(N))
+               .getNode();
 
-    replaceNode(N, Node);
   } break;
   case ARM::BL:
   case ARM::BL_pred:
   case ARM::tBL: {
     SDValue Func = N->getOperand(0);
-    SDNode *Node = nullptr;
+
     if (RegisterSDNode::classof(Func.getNode())) {
       Func = FuncInfo->getValFromRegMap(Func);
-      Node =
-          CurDAG
-              ->getNode(ISD::BRIND, Dl, getDefaultEVT(), Func, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), Func,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(), Func,
+                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
                            getMDOperand(N))
                  .getNode();
     }
 
     FuncInfo->setValueByRegister(ARM::R0, SDValue(Node, 0));
     FuncInfo->NodeRegMap[Node] = ARM::R0;
-    replaceNode(N, Node);
   } break;
   case ARM::BLX:
   case ARM::BLXi:
@@ -477,30 +477,29 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::tBLXr: {
     // outs() << "WARNING: ARM::BLX Not yet implemented!\n";
     SDValue Func = N->getOperand(0);
-    SDNode *Node = nullptr;
+
     if (RegisterSDNode::classof(Func.getNode())) {
       Func = FuncInfo->getValFromRegMap(Func);
-      Node =
-          CurDAG
-              ->getNode(ISD::BRIND, Dl, getDefaultEVT(), Func, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), Func,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(), Func,
+                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
                            getMDOperand(N))
                  .getNode();
     }
 
     FuncInfo->setValueByRegister(ARM::R0, SDValue(Node, 0));
     FuncInfo->NodeRegMap[Node] = ARM::R0;
-    replaceNode(N, Node);
   } break;
   case ARM::BR_JTr: {
-    SDNode *Node = nullptr;
     SDValue Rd = N->getOperand(0);
-    Node = CurDAG->getNode(ISD::BR_JT, Dl, getDefaultEVT(), Rd, getMDOperand(N))
+    Node = CurDAG
+               ->getNode(ISD::BR_JT, Dl, getDefaultEVT(FuncInfo), Rd,
+                         getMDOperand(N))
                .getNode();
-    replaceNode(N, Node);
   } break;
   case ARM::BX:
   case ARM::BX_CALL:
@@ -511,11 +510,10 @@ void InstSelector::selectCode(SDNode *N) {
     if (RegisterSDNode::classof(CallReg.getNode()))
       CallReg = FuncInfo->getValFromRegMap(CallReg);
 
-    SDNode *Node =
-        CurDAG
-            ->getNode(ISD::BRIND, Dl, getDefaultEVT(), CallReg, getMDOperand(N))
-            .getNode();
-    replaceNode(N, Node);
+    Node = CurDAG
+               ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), CallReg,
+                         getMDOperand(N))
+               .getNode();
   } break;
   case ARM::BX_RET:
   case ARM::tBX_RET:
@@ -538,12 +536,11 @@ void InstSelector::selectCode(SDNode *N) {
     // Create condition SDValuleR
     // TODO: It should be verified why this type node can not be added Metadata
     // Operand.
-    SDNode *Node = CurDAG
-                       ->getNode(ISD::SETCC, Dl, getDefaultEVT(), Cmpl, Cmph
-                                 /* , getMDOperand(N) */)
-                       .getNode();
+    Node = CurDAG
+               ->getNode(ISD::SETCC, Dl, getDefaultEVT(FuncInfo), Cmpl, Cmph
+                         /* , getMDOperand(N) */)
+               .getNode();
 
-    replaceNode(N, Node);
   } break;
   /* AND */
   case ARM::ANDri:
@@ -556,18 +553,17 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2ANDrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
-    if (isTwoAddressMode(Rd.getNode())) {
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       // AND<c> <Rdn>,<Rm>
       // ANDS <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::AND, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::AND, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       // AND{S}<c> <Rd>,<Rn>,#<const>
       SDValue Op2 = N->getOperand(2);
@@ -575,14 +571,13 @@ void InstSelector::selectCode(SDNode *N) {
         Op2 = FuncInfo->getValFromRegMap(Op2);
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::AND, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::AND, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
     // TODO:
     // AND{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // AND{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -597,30 +592,29 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2ASRri: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::SRA, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SRA, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::SRA, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SRA, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* CMN */
   case ARM::CMNri:
@@ -631,18 +625,16 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2CMNzrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
     Rd = FuncInfo->getValFromRegMap(Rd);
-    Node =
-        CurDAG
-            ->getNode(ARMISD::CMN, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-            .getNode();
+    Node = CurDAG
+               ->getNode(ARMISD::CMN, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                         getMDOperand(N))
+               .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* EOR */
   case ARM::EORri:
@@ -655,31 +647,30 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2EORri: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       // EORS <Rdn>,<Rm>
       // EOR<c> <Rdn>,<Rm>
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::XOR, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       // EOR{S}<c> <Rd>,<Rn>,#<const>
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::XOR, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
     // TODO:
     // EOR{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // EOR{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -694,16 +685,15 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2MSRbanked: {
     // Update the CPSR.
     SDValue Cond = N->getOperand(1);
-    SDNode *Node = nullptr;
+
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Cond = FuncInfo->getValFromRegMap(N->getOperand(1));
 
     Node = CurDAG
-               ->getNode(EXT_ARMISD::MSR, Dl, getDefaultEVT(), Cond,
+               ->getNode(EXT_ARMISD::MSR, Dl, getDefaultEVT(FuncInfo), Cond,
                          getMDOperand(N))
                .getNode();
 
-    replaceNode(N, Node);
   } break;
   /* MUL */
   case ARM::MUL:
@@ -714,16 +704,16 @@ void InstSelector::selectCode(SDNode *N) {
     /* MUL{S}<c> <Rd>, <Rn>, <Rm> */
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
+
     SDValue Op2 = N->getOperand(2);
     Op2 = FuncInfo->getValFromRegMap(Op2);
     Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-    Node =
-        CurDAG->getNode(ISD::MUL, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-            .getNode();
+    Node = CurDAG
+               ->getNode(ISD::MUL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                         getMDOperand(N))
+               .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* MVN */
   case ARM::MVNi:
@@ -736,17 +726,16 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2MVNs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
+
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
     Node = CurDAG
-               ->getNode(ISD::XOR, Dl, getDefaultEVT(), Rn,
-                         CurDAG->getConstant(-1, Dl, getDefaultEVT()))
+               ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rn,
+                         CurDAG->getConstant(-1, Dl, getDefaultEVT(FuncInfo)))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* LSL */
   case ARM::LSLi:
@@ -757,29 +746,28 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2LSLrr: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::SHL, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SHL, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::SHL, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SHL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* LSR */
   case ARM::LSRi:
@@ -790,28 +778,27 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2LSRrr: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::SRL, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SRL, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::SRL, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::SRL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* ORR */
   case ARM::ORRri:
@@ -824,29 +811,29 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2ORRrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
+
     // <opcode>   {<cond>}{s}<Rd>，<Rn>{，<OP2>}
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG->getNode(ISD::OR, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::OR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-      Node =
-          CurDAG
-              ->getNode(ISD::OR, Dl, getDefaultEVT(), Rn, Op2, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::OR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
+                           getMDOperand(N))
+                 .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* ROR */
   case ARM::RORi:
@@ -856,40 +843,39 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2RORrr: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
-      Node =
-          CurDAG
-              ->getNode(ISD::ROTR, Dl, getDefaultEVT(), Rd, Rn, getMDOperand(N))
-              .getNode();
+      Node = CurDAG
+                 ->getNode(ISD::ROTR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
+                           getMDOperand(N))
+                 .getNode();
     } else {
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       Node = CurDAG
-                 ->getNode(ISD::ROTR, Dl, getDefaultEVT(), Rn, Op2,
+                 ->getNode(ISD::ROTR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
                            getMDOperand(N))
                  .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* RRX */
   case ARM::RRX: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-    SDNode *Node = nullptr;
-    Node =
-        CurDAG->getNode(ARMISD::RRX, Dl, getDefaultEVT(), Rn, getMDOperand(N))
-            .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    Node = CurDAG
+               ->getNode(ARMISD::RRX, Dl, getDefaultEVT(FuncInfo), Rn,
+                         getMDOperand(N))
+               .getNode();
+
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* RSB */
   case ARM::RSBri:
@@ -902,13 +888,13 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2RSBrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(), Rd, Rn,
+                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                            getMDOperand(N))
                  .getNode();
     } else {
@@ -917,12 +903,11 @@ void InstSelector::selectCode(SDNode *N) {
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(), Op2, Rn,
-                           getMDOperand(N))
+                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(FuncInfo), Op2,
+                           Rn, getMDOperand(N))
                  .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* RSC */
   case ARM::RSCri:
@@ -933,14 +918,14 @@ void InstSelector::selectCode(SDNode *N) {
     // RSC{S}<c>.W <Rd>,<Rn>,#<const>
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(), Rd, Rn,
+                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                            getMDOperand(N))
                  .getNode();
     } else {
@@ -949,23 +934,23 @@ void InstSelector::selectCode(SDNode *N) {
         Op2 = FuncInfo->getValFromRegMap(Op2);
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(), Rn, Op2,
-                           getMDOperand(N))
+                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(FuncInfo), Rn,
+                           Op2, getMDOperand(N))
                  .getNode();
     }
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* CLZ */
   case ARM::CLZ:
   case ARM::t2CLZ: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
-    SDNode *Node = nullptr;
-    Node = CurDAG->getNode(ISD::CTLZ, Dl, getDefaultEVT(), Rn, getMDOperand(N))
+
+    Node = CurDAG
+               ->getNode(ISD::CTLZ, Dl, getDefaultEVT(FuncInfo), Rn,
+                         getMDOperand(N))
                .getNode();
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* SBC */
   case ARM::SBCrr:
@@ -973,13 +958,12 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::tSBC: {
     SDValue Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
     SDValue Operand2 = FuncInfo->getValFromRegMap(N->getOperand(2));
-    SDNode *Node = CurDAG
-                       ->getNode(EXT_ARMISD::SBC, Dl, getDefaultEVT(), Rn,
-                                 Operand2, getMDOperand(N))
-                       .getNode();
+    Node = CurDAG
+               ->getNode(EXT_ARMISD::SBC, Dl, getDefaultEVT(FuncInfo), Rn,
+                         Operand2, getMDOperand(N))
+               .getNode();
 
-    recordDefinition(Rn.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rn.getNode(), Node);
   } break;
   /* TEQ */
   case ARM::TEQri:
@@ -991,19 +975,17 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2TEQrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
     Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
     Node = CurDAG
-               ->getNode(EXT_ARMISD::TEQ, Dl, getDefaultEVT(), Rd, Rn,
+               ->getNode(EXT_ARMISD::TEQ, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                          getMDOperand(N))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* TST */
   case ARM::TSTrsi:
@@ -1016,19 +998,17 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2TSTrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
     Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
     Node = CurDAG
-               ->getNode(EXT_ARMISD::TST, Dl, getDefaultEVT(), Rd, Rn,
+               ->getNode(EXT_ARMISD::TST, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                          getMDOperand(N))
                .getNode();
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* BIC */
   case ARM::BICri:
@@ -1041,14 +1021,14 @@ void InstSelector::selectCode(SDNode *N) {
   case ARM::t2BICrs: {
     SDValue Rd = N->getOperand(0);
     SDValue Rn = N->getOperand(1);
-    SDNode *Node = nullptr;
-    if (isTwoAddressMode(Rd.getNode())) {
+
+    if (isTwoAddressMode(DAGInfo, Rd.getNode())) {
       if (RegisterSDNode::classof(N->getOperand(1).getNode()))
         Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
 
       SDValue Rd = FuncInfo->getValFromRegMap(N->getOperand(0));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(), Rd, Rn,
+                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
                            getMDOperand(N))
                  .getNode();
     } else {
@@ -1058,13 +1038,12 @@ void InstSelector::selectCode(SDNode *N) {
 
       Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
       Node = CurDAG
-                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(), Rn, Op2,
-                           getMDOperand(N))
+                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(FuncInfo), Rn,
+                           Op2, getMDOperand(N))
                  .getNode();
     }
 
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* MLA */
   case ARM::MLA:
@@ -1073,29 +1052,26 @@ void InstSelector::selectCode(SDNode *N) {
     SDValue Rn = FuncInfo->getValFromRegMap(N->getOperand(1));
     SDValue Rm = FuncInfo->getValFromRegMap(N->getOperand(2));
     SDValue Ra = FuncInfo->getValFromRegMap(N->getOperand(3));
-    SDNode *Node = nullptr;
+
     Node = CurDAG
-               ->getNode(EXT_ARMISD::MLA, Dl, getDefaultEVT(), Rn, Rm, Ra,
-                         getMDOperand(N))
+               ->getNode(EXT_ARMISD::MLA, Dl, getDefaultEVT(FuncInfo), Rn, Rm,
+                         Ra, getMDOperand(N))
                .getNode();
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   /* UXTB */
   case ARM::UXTB: {
     SDValue Rd = N->getOperand(0);
     SDValue Rm = N->getOperand(1);
     SDValue Rotation = N->getOperand(2);
-    SDNode *Node = nullptr;
 
     if (RegisterSDNode::classof(N->getOperand(1).getNode()))
       Rm = FuncInfo->getValFromRegMap(N->getOperand(1));
     Node = CurDAG
-               ->getNode(EXT_ARMISD::UXTB, Dl, getDefaultEVT(), Rd, Rm,
+               ->getNode(EXT_ARMISD::UXTB, Dl, getDefaultEVT(FuncInfo), Rd, Rm,
                          Rotation, getMDOperand(N))
                .getNode();
-    recordDefinition(Rd.getNode(), Node);
-    replaceNode(N, Node);
+    recordDefinition(FuncInfo, Rd.getNode(), Node);
   } break;
   case ARM::MCR:
   case ARM::MCRR:
@@ -1116,11 +1092,10 @@ void InstSelector::selectCode(SDNode *N) {
     if (RegisterSDNode::classof(Rn.getNode()))
       Rn = FuncInfo->getValFromRegMap(Rn);
 
-    SDNode *Node =
-        CurDAG
-            ->getNode(EXT_ARMISD::MRS, Dl, getDefaultEVT(), Rn, getMDOperand(N))
-            .getNode();
-    replaceNode(N, Node);
+    Node = CurDAG
+               ->getNode(EXT_ARMISD::MRS, Dl, getDefaultEVT(FuncInfo), Rn,
+                         getMDOperand(N))
+               .getNode();
   } break;
   /* ABS */
   case ARM::ABS:
@@ -1129,7 +1104,7 @@ void InstSelector::selectCode(SDNode *N) {
   } break;
   case ARM::tLDRpci:
   case ARM::LDRcp: {
-    outs() << "WARNING: ARM::LDR Not yet implemented!\n";
+    outs() << "WARNING: ARM::LDRcp Not yet implemented!\n";
   } break;
   case ARM::t2SBFX:
   case ARM::SBFX:
@@ -1179,13 +1154,9 @@ void InstSelector::selectCode(SDNode *N) {
   } break;
     // TODO: Need to add other pattern matching here.
   }
-}
 
-void InstSelector::select(SDNode *N) {
-  if (!N->isMachineOpcode()) {
-    N->setNodeId(-1);
-    return; // Already selected.
+  if (Node) {
+    replaceNode(DAGInfo, N, Node);
   }
-
-  selectCode(N);
+  return Node;
 }

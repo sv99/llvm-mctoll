@@ -12,11 +12,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMMachineInstructionRaiser.h"
-#include "DAG/DAGBuilder.h"
 #include "DAG/DAGRaisingInfo.h"
 #include "DAG/FunctionRaisingInfo.h"
 #include "DAG/IREmitter.h"
-#include "DAG/InstSelector.h"
 #include "Raiser/ModuleRaiser.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 
@@ -24,47 +22,6 @@
 
 using namespace llvm;
 using namespace llvm::mctoll;
-
-void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo,
-                                                   DAGRaisingInfo *DAGInfo,
-                                                   MachineBasicBlock *MBB) {
-
-  auto *SDB = new DAGBuilder(*DAGInfo, *FuncInfo);
-  for (MachineInstr &MI : MBB->instrs()) {
-    SDB->visit(MI);
-  }
-
-  auto *SLT = new InstSelector(*DAGInfo, *FuncInfo);
-  auto *CurDAG = &DAGInfo->getCurDAG();
-  auto *BB = FuncInfo->getBasicBlock(*MBB);
-  IREmitter Imt(BB, DAGInfo, FuncInfo);
-  Imt.setjtList(JTList);
-  // doInstructionSelection + emitDAG
-  SelectionDAG::allnodes_iterator ISelPosition = CurDAG->allnodes_begin();
-  while (ISelPosition != CurDAG->allnodes_end()) {
-    SDNode *Node = &*ISelPosition++;
-    SLT->select(Node);
-    Imt.emitNode(Node);
-  }
-
-  LLVM_DEBUG(dumpDAG(CurDAG));
-
-  // If the current function has return value, records relationship between
-  // BasicBlock and each Value which is mapped with R0. In order to record
-  // the return Value of each exit BasicBlock.
-  Type *RTy = FuncInfo->Fn->getReturnType();
-  if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
-    Instruction *TInst = dyn_cast<Instruction>(
-        DAGInfo->getRealValue(FuncInfo->RegValMap[ARM::R0]));
-    assert(TInst && "A def R0 was pointed to a non-instruction!!!");
-    BasicBlock *TBB = TInst->getParent();
-    FuncInfo->RetValMap[TBB] = TInst;
-  }
-
-  // Free the SelectionDAG state, now that we're finished with it.
-  DAGInfo->clear();
-  CurDAG->clear();
-}
 
 void ARMMachineInstructionRaiser::initEntryBasicBlock(FunctionRaisingInfo *FuncInfo) {
   BasicBlock *EntryBlock = &RaisedFunction->getEntryBlock();
@@ -225,9 +182,49 @@ LLVM_DUMP_METHOD void ARMMachineInstructionRaiser::dumpDAG(SelectionDAG *CurDAG)
       dumpNodes(CurDAG, &Node, 2);
   }
 
-  if (CurDAG->getRoot().getNode()) dumpNodes(CurDAG, Root, 2);
+  if (CurDAG->getRoot().getNode())
+    dumpNodes(CurDAG, Root, 2);
   dbgs() << "\n";
 }
 #endif
+
+void ARMMachineInstructionRaiser::selectBasicBlock(FunctionRaisingInfo *FuncInfo,
+                                                   DAGRaisingInfo *DAGInfo,
+                                                   MachineBasicBlock *MBB) {
+
+  auto *BB = FuncInfo->getBasicBlock(*MBB);
+  IREmitter Imt(BB, DAGInfo, FuncInfo);
+  Imt.setjtList(JTList);
+
+  for (MachineInstr &MI : MBB->instrs()) {
+    SDNode *Node = visit(FuncInfo, DAGInfo, MI);
+    SDNode *SelNode = selectCode(FuncInfo, DAGInfo, Node);
+    if (SelNode) {
+      Imt.emitSDNode(SelNode);
+    }
+  }
+
+  auto *CurDAG = &DAGInfo->getCurDAG();
+  LLVM_DEBUG(dbgs() << "DUG after start.\n");
+  LLVM_DEBUG(dumpDAG(CurDAG));
+  LLVM_DEBUG(dbgs() << "DUG after end.\n");
+
+  // If the current function has return value, records relationship between
+  // BasicBlock and each Value which is mapped with R0. In order to record
+  // the return Value of each exit BasicBlock.
+  Type *RTy = FuncInfo->Fn->getReturnType();
+  if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
+    auto *Reg = FuncInfo->RegValMap[ARM::R0];
+    auto *Val = DAGInfo->getRealValue(Reg);
+    Instruction *TInst = dyn_cast<Instruction>(Val);
+    assert(TInst && "A def R0 was pointed to a non-instruction!!!");
+    BasicBlock *TBB = TInst->getParent();
+    FuncInfo->RetValMap[TBB] = TInst;
+  }
+
+  // Free the SelectionDAG state, now that we're finished with it.
+  DAGInfo->clear();
+  CurDAG->clear();
+}
 
 #undef DEBUG_TYPE

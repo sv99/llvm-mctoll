@@ -72,7 +72,6 @@ static inline bool isHalfwordOP(unsigned Opcode) {
 
 unsigned ARMMachineInstructionRaiser::getBitCount(unsigned Opcode) {
   unsigned Ret;
-  Module *M = MR->getModule();
 
   switch (Opcode) {
   default:
@@ -101,8 +100,6 @@ unsigned ARMMachineInstructionRaiser::getBitCount(unsigned Opcode) {
 
 Type *ARMMachineInstructionRaiser::getStackType(unsigned Size) {
   Type *T = nullptr;
-  Module *M = MR->getModule();
-  LLVMContext &Ctx(M->getContext());
 
   switch (Size) {
   default:
