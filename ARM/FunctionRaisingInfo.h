@@ -60,8 +60,6 @@ typedef struct {
   bool UpdateCPSR;
   unsigned Cond;
   bool IsTwoAddress;
-  Value *Val;
-  const MachineInstr *MI;
   SDNode *Node;
 } NodePropertyInfo;
 

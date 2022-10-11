@@ -15,6 +15,7 @@
 #define LLVM_TOOLS_LLVM_MCTOLL_ARM_ARMMACHINEINSTRUCTIONRAISER_H
 
 #include "ARMSubtarget.h"
+#include "FunctionRaisingInfo.h"
 #include "Raiser/MachineInstructionRaiser.h"
 
 namespace llvm {
@@ -191,17 +192,12 @@ private:
 
   // Functions from removed DAG folder
 
-  /// Instruction opcode selection.
-  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-                     const MachineInstr &MI);
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
   /// Record the new defined Node, it uses to map the register number to Node.
   /// In DAG emitter, emitter get a value of use base on this defined Node.
   void recordDefinition(FunctionRaisingInfo *FuncInfo,
                         SDNode *OldNode, SDNode *NewNode);
-  bool isTwoAddressMode(FunctionRaisingInfo *FuncInfo,
-                        const MachineInstr &MI);
   /// Checks the SDNode is a function return or not.
   bool isReturnNode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
 
@@ -210,8 +206,7 @@ private:
                 const MachineInstr &MI);
   /// Analyzes CPSR register information of MI to collect conditional
   /// code properties.
-  void visitCC(FunctionRaisingInfo *FuncInfo,
-               const MachineInstr &MI);
+  NodePropertyInfo *CreateNPI(const MachineInstr &MI);
 
   // IR emitter
 
@@ -219,14 +214,46 @@ private:
   void emitInstr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
                  const MachineInstr &MI);
 
-  /// Emit SDNodes of binary operations.
-  void emitBinary(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-                  unsigned Opcode, const MachineInstr &MI);
+  /// Emit binary operations, called from macros.
+  void emitBinaryAdd(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinarySub(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryMul(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryShl(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryLShr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryAShr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryAnd(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryOr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
+  void emitBinaryXor(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
   void emitCondCode(FunctionRaisingInfo *FuncInfo, unsigned CondValue,
                     BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
-  void emitBinaryCPSR(FunctionRaisingInfo *FuncInfo, Value *Inst,
-                      BasicBlock *BB, unsigned Opcode,
-                      const MachineInstr &MI);
+  /// Update the N Z C V flags for binary operation, called from macros.
+  void emitBinaryCPSRAdd(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRSub(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRMul(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRShl(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRLShr(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                          BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRAShr(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                          BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRAnd(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSROr(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                        BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRXor(FunctionRaisingInfo *FuncInfo, Value *Inst,
+                         BasicBlock *BB, const MachineInstr &MI);
   /// Update the N Z C V flags of global variable.
   void emitCPSR(FunctionRaisingInfo *FuncInfo, Value *Operand0, Value *Operand1,
                 BasicBlock *BB, unsigned Flag);

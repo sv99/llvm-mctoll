@@ -103,38 +103,28 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
   ArrayRef<EVT> VTs(VCtt);
 
   SDLoc Sdl(nullptr, 0);
-  MachineSDNode *MNode =
-      DAG->getMachineNode(MI.getOpcode(), Sdl, DAG->getVTList(VTs), Ops);
-
-  NodePropertyInfo *NPI = new NodePropertyInfo();
-  NPI->MI = &MI;
-  NPI->Node = MNode;
-  FuncInfo->NPMap[&MI] = NPI;
-
-  // TODO: Now the predicate operand not stripped, so the two-address operands
-  // more than two.
-  // Set the Node is two-address. The default is three-address.
-  if (VCtv.size() < 4)
-    NPI->IsTwoAddress = true;
-
-  visitCC(FuncInfo, MI);
-  return MNode;
+  return DAG->getMachineNode(MI.getOpcode(), Sdl, DAG->getVTList(VTs), Ops);
 }
 
 /// Analyzes CPSR register information of MI to collect conditional
 /// code properties.
-void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
-                                          const MachineInstr &MI) {
-  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[&MI];
+NodePropertyInfo *ARMMachineInstructionRaiser::CreateNPI(const MachineInstr &MI) {
+  NodePropertyInfo *NodeInfo = new NodePropertyInfo();
   // Initialize the NodePropertyInfo properties.
-  NodeInfo.HasCPSR = false;
-  NodeInfo.Special = false;
-  NodeInfo.UpdateCPSR = false;
+  NodeInfo->HasCPSR = false;
+  NodeInfo->Special = false;
+  NodeInfo->UpdateCPSR = false;
 
   // ARM::CPSR register use index in MachineInstr.
   int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
   // Number of operands for MachineInstr.
   int NumOps = MI.getNumOperands();
+
+  // TODO: Now the predicate operand not stripped, so the two-address operands
+  // more than two.
+  // Set the MI is two-address. The default is three-address.
+  if (NumOps < 4)
+    NodeInfo->IsTwoAddress = true;
 
   // If the MachineInstr has ARM::CPSR register, update the NodePropertyInfo
   // properties.
@@ -147,13 +137,13 @@ void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
         assert(MI.getOperand(Idx - 1).isImm() &&
                "Attempt to get non-imm operand!");
 
-        NodeInfo.Cond = MI.getOperand(Idx - 1).getImm();
-        NodeInfo.Special = true;
+        NodeInfo->Cond = MI.getOperand(Idx - 1).getImm();
+        NodeInfo->Special = true;
       } else {
         // Pattern matching: addeq r0, r0, 0
         for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
           if (MI.getOperand(Idx - OpIdx).isImm()) {
-            NodeInfo.Cond = MI.getOperand(Idx - OpIdx).getImm();
+            NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
             break;
           }
         }
@@ -163,19 +153,20 @@ void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
           MI.getOperand(Idx - 1).getReg() == ARM::CPSR) {
         for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
           if (MI.getOperand(Idx - OpIdx).isImm()) {
-            NodeInfo.Special = true;
-            NodeInfo.Cond = MI.getOperand(Idx - OpIdx).getImm();
+            NodeInfo->Special = true;
+            NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
             break;
           }
         }
       }
     }
     // Pattern matching: adds r0, r0, 0
-    if (NodeInfo.Cond == ARMCC::AL)
-      NodeInfo.UpdateCPSR = true;
+    if (NodeInfo->Cond == ARMCC::AL)
+      NodeInfo->UpdateCPSR = true;
 
-    NodeInfo.HasCPSR = true;
+    NodeInfo->HasCPSR = true;
   }
+  return NodeInfo;
 }
 
 #undef DEBUG_TYPE
