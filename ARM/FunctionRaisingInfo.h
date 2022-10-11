@@ -62,12 +62,23 @@ typedef struct {
   bool IsTwoAddress;
   Value *Val;
   const MachineInstr *MI;
+  SDNode *Node;
 } NodePropertyInfo;
 
 /// This contains information that is global to a function that is used when
 /// raising a region of the function.
-class FunctionRaisingInfo : public FunctionLoweringInfo {
+class FunctionRaisingInfo { //: public FunctionLoweringInfo {
 public:
+  // fields from FunctionLoweringInfo
+  Function *Fn;
+  MachineFunction *MF;
+  /// MBBMap - A mapping from LLVM basic blocks to their machine code entry.
+  DenseMap<const BasicBlock*, MachineBasicBlock *> MBBMap;
+  /// ValueMap - Since we emit code for the function a basic block at a time,
+  /// we must remember which virtual registers hold the values for
+  /// cross-basic-block values.
+  DenseMap<const Value *, Register> ValueMap;
+
   ARMModuleRaiser *MR;
   /// The mapped return Value;
   SDValue RetValue;
@@ -124,14 +135,17 @@ public:
   const DataLayout *DLT;
   Type *DefaultType;
 
-  /// The map for each SDNode with its additional property.
-  DenseMap<SDNode *, NodePropertyInfo *> NPMap;
+  /// The map for each MI with its additional property.
+  //DenseMap<SDNode *, NodePropertyInfo *> NPMap;
+  DenseMap<const MachineInstr *, NodePropertyInfo *> NPMap;
+  /// The map for each SDNode with its IR value.
+  DenseMap<SDNode *, Value *> VMap;
   /// Gets corresponding SelectionDAG object.
   SelectionDAG &getCurDAG() { return *DAG; }
   /// Gets the related IR Value of given SDNode.
   Value *getRealValue(SDNode *Node);
   /// Set the related IR Value to SDNode.
-  void setRealValue(SDNode *N, Value *V);
+  void setRealValue(SDNode *Node, Value *V);
 
 private:
   SelectionDAG *DAG;

@@ -189,10 +189,11 @@ private:
   void selectBasicBlock(FunctionRaisingInfo *FuncInfo, MachineBasicBlock *MBB);
   void dumpDAG(SelectionDAG *CurDAG);
 
-  // instruction code selection functions
+  // Functions from removed DAG folder
 
   /// Instruction opcode selection.
-  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *N);
+  SDNode *selectCode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                     const MachineInstr &MI);
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
   /// Record the new defined Node, it uses to map the register number to Node.
@@ -200,8 +201,10 @@ private:
   void recordDefinition(FunctionRaisingInfo *FuncInfo,
                         SDNode *OldNode, SDNode *NewNode);
   /// Replace all uses of F with T, then remove F from the DAG.
-  void replaceNode(FunctionRaisingInfo *FuncInfo, SDNode *F, SDNode *T);
-  bool isTwoAddressMode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
+  void replaceNode(FunctionRaisingInfo *FuncInfo,
+                   const MachineInstr &MI, SDNode *F, SDNode *T);
+  bool isTwoAddressMode(FunctionRaisingInfo *FuncInfo,
+                        const MachineInstr &MI);
   /// Checks the SDNode is a function return or not.
   bool isReturnNode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
 
@@ -211,31 +214,36 @@ private:
   /// Analyzes CPSR register information of MI to collect conditional
   /// code properties.
   void visitCC(FunctionRaisingInfo *FuncInfo,
-               const MachineInstr &MI, SDNode *Node);
+               const MachineInstr &MI);
 
   // IR emitter
 
   /// Emit Instruction and add to BasicBlock.
-  void emitInstr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, MachineInstr &MI);
+  void emitInstr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                 const MachineInstr &MI);
   /// Generate SDNode code for a target-independent node.
   /// Emit SDNode to Instruction and add to BasicBlock.
-  void emitSDNode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node);
+  void emitSDNode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                  const MachineInstr &MI);
   void emitSpecialNode(FunctionRaisingInfo *FuncInfo,
-                       BasicBlock *BB, SDNode *Node);
+                       BasicBlock *BB, const MachineInstr &MI);
 
   /// Emit SDNodes of binary operations.
-  void emitBinary(FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node);
+  void emitBinary(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                  const MachineInstr &MI);
   void emitCondCode(FunctionRaisingInfo *FuncInfo, unsigned CondValue,
                     BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
   void emitBinaryCPSR(FunctionRaisingInfo *FuncInfo, Value *Inst,
-                      BasicBlock *BB, unsigned Opcode, SDNode *Node);
+                      BasicBlock *BB, unsigned Opcode,
+                      const MachineInstr &MI);
   /// Update the N Z C V flags of global variable.
   void emitCPSR(FunctionRaisingInfo *FuncInfo, Value *Operand0, Value *Operand1,
                 BasicBlock *BB, unsigned Flag);
   void emitSpecialCPSR(FunctionRaisingInfo *FuncInfo,
                        Value *Result, BasicBlock *BB, unsigned Flag);
   /// Create PHINode for value use selection when running.
-  PHINode *createAndEmitPHINode(FunctionRaisingInfo *FuncInfo, SDNode *Node,
+  PHINode *createAndEmitPHINode(FunctionRaisingInfo *FuncInfo,
+                                const MachineInstr &MI,
                                 BasicBlock *BB, BasicBlock *IfBB,
                                 BasicBlock *ElseBB, Instruction *IfInst);
   PointerType *getPointerType() {

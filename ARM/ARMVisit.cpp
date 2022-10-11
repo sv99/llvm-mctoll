@@ -108,7 +108,8 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
 
   NodePropertyInfo *NPI = new NodePropertyInfo();
   NPI->MI = &MI;
-  FuncInfo->NPMap[MNode] = NPI;
+  NPI->Node = MNode;
+  FuncInfo->NPMap[&MI] = NPI;
 
   // TODO: Now the predicate operand not stripped, so the two-address operands
   // more than two.
@@ -116,16 +117,15 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
   if (VCtv.size() < 4)
     NPI->IsTwoAddress = true;
 
-  visitCC(FuncInfo, MI, MNode);
+  visitCC(FuncInfo, MI);
   return MNode;
 }
 
 /// Analyzes CPSR register information of MI to collect conditional
 /// code properties.
 void ARMMachineInstructionRaiser::visitCC(FunctionRaisingInfo *FuncInfo,
-                                          const MachineInstr &MI,
-                                          SDNode *Node) {
-  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[Node];
+                                          const MachineInstr &MI) {
+  NodePropertyInfo &NodeInfo = *FuncInfo->NPMap[&MI];
   // Initialize the NodePropertyInfo properties.
   NodeInfo.HasCPSR = false;
   NodeInfo.Special = false;

@@ -26,13 +26,13 @@ using namespace llvm::mctoll;
 void ARMMachineInstructionRaiser::updateReturnRegister(MachineFunction &MF) {
   for (MachineBasicBlock &MBB : MF) {
     if (MBB.succ_empty()) {
-      bool Loop = true;
+      //bool Loop = true;
       for (MachineInstr &MI : MBB.instrs()) {
         for (MachineOperand &MO : MI.operands()) {
           if (MO.isReg() && (MO.getReg() == ARM::R0)) {
             if (MO.isDef()) {
               MO.ChangeToFrameIndex(0);
-              Loop = false;
+              // Loop = false;
               break;
             }
           }

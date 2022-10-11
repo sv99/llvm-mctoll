@@ -252,10 +252,11 @@ void ARMMachineInstructionRaiser::emitCondCode(
 
 /// Create PHINode for value use selection when running.
 PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
-    FunctionRaisingInfo *FuncInfo, SDNode *Node,
+    FunctionRaisingInfo *FuncInfo, const MachineInstr &MI,
     BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB, Instruction *IfInst) {
   PHINode *Phi = PHINode::Create(getDefaultType(), 2, "", ElseBB);
 
+  auto *Node = FuncInfo->NPMap[&MI]->Node;
   if (FuncInfo->ArgValMap.count(FuncInfo->NodeRegMap[Node]) > 0) {
     Phi->addIncoming(FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]], BB);
   } else {
@@ -360,7 +361,7 @@ Type *ARMMachineInstructionRaiser::getIntTypeByPtr(Type *PTy) {
                                                                                \
   Value *Inst = BinaryOperator::Create##OPC(S0, S1);                           \
   IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));                  \
-  PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,        \
+  PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,        \
                                       dyn_cast<Instruction>(Inst));            \
   FuncInfo->setRealValue(Node, Phi);                                           \
   FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -374,8 +375,9 @@ Type *ARMMachineInstructionRaiser::getIntTypeByPtr(Type *PTy) {
 
 void ARMMachineInstructionRaiser::emitBinaryCPSR(
     FunctionRaisingInfo *FuncInfo, Value *Inst, BasicBlock *BB,
-    unsigned Opcode, SDNode *Node) {
+    unsigned Opcode, const MachineInstr &MI) {
   IRBuilder<> IRB(BB);
+  auto *Node = FuncInfo->NPMap[&MI]->Node;
   Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
   Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
 
@@ -454,7 +456,10 @@ void ARMMachineInstructionRaiser::emitBinaryCPSR(
 }
 
 void ARMMachineInstructionRaiser::emitBinary(
-    FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node) {
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+    const MachineInstr &MI) {
+  auto *NPI = FuncInfo->NPMap[&MI];
+  auto *Node = NPI->Node;
   unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
@@ -465,26 +470,26 @@ void ARMMachineInstructionRaiser::emitBinary(
   switch (InstOpc) {
 #define HANDLE_BINARY(OPCODE)                                                  \
   case Instruction::OPCODE: {                                                  \
-    if (FuncInfo->NPMap[Node]->HasCPSR) {                                       \
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;                         \
-      if (!(FuncInfo->NPMap[Node]->UpdateCPSR)) {                               \
+    if (NPI->HasCPSR) {                                                        \
+      unsigned CondValue = NPI->Cond;                                          \
+      if (!(NPI->UpdateCPSR)) {                                                \
         HANDLE_EMIT_CONDCODE(OPCODE)                                           \
-      } else if (FuncInfo->NPMap[Node]->Special) {                              \
+      } else if (NPI->Special) {                                               \
         HANDLE_EMIT_CONDCODE_COMMON(OPCODE)                                    \
-        emitBinaryCPSR(FuncInfo, Inst, IfBB, InstOpc, Node);                   \
+        emitBinaryCPSR(FuncInfo, Inst, IfBB, InstOpc, MI);                     \
         IRB.CreateBr(ElseBB);                                                  \
         IRB.SetInsertPoint(ElseBB);                                            \
       } else {                                                                 \
         Value *Inst = IRB.Create##OPCODE(S0, S1);                              \
-        FuncInfo->setRealValue(Node, Inst);                                     \
+        FuncInfo->setRealValue(Node, Inst);                                    \
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;                \
-        emitBinaryCPSR(FuncInfo, Inst, BB, InstOpc, Node);                     \
+        emitBinaryCPSR(FuncInfo, Inst, BB, InstOpc, MI);                       \
       }                                                                        \
     } else {                                                                   \
       Value *Inst = BinaryOperator::Create##OPCODE(S0, S1);                    \
       BasicBlock *CBB = IRB.GetInsertBlock();                                  \
       CBB->getInstList().push_back(dyn_cast<Instruction>(Inst));               \
-      FuncInfo->setRealValue(Node, Inst);                                       \
+      FuncInfo->setRealValue(Node, Inst);                                      \
       FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;                  \
     }                                                                          \
     break;                                                                     \
@@ -521,11 +526,12 @@ static uint64_t getMCInstIndex(const MachineInstr &MI) {
 
 /// Emit Instruction and add to BasicBlock.
 void ARMMachineInstructionRaiser::emitInstr(
-    FunctionRaisingInfo *FuncInfo, BasicBlock *BB, MachineInstr &MI) {
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+    const MachineInstr &MI) {
   SDNode *Node = visit(FuncInfo, MI);
-  SDNode *SelNode = selectCode(FuncInfo, BB, Node);
+  SDNode *SelNode = selectCode(FuncInfo, BB, MI);
   if (SelNode) {
-    emitSDNode(FuncInfo, BB, SelNode);
+    emitSDNode(FuncInfo, BB, MI);
   }
 }
 
@@ -534,7 +540,10 @@ void ARMMachineInstructionRaiser::emitInstr(
 /// 1. Map ISD opcode to Instruction opcode.
 /// 2. Abstract node to instruction.
 void ARMMachineInstructionRaiser::emitSDNode(
-    FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node) {
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+    const MachineInstr &MI) {
+  auto *NPI = FuncInfo->NPMap[&MI];
+  auto *Node = NPI->Node;
   unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   auto *DLT = &M->getDataLayout();
@@ -551,7 +560,7 @@ void ARMMachineInstructionRaiser::emitSDNode(
 
   switch (InstOpc) {
   default:
-    emitSpecialNode(FuncInfo, BB, Node);
+    emitSpecialNode(FuncInfo, BB, MI);
     break;
   case Add:
   case Sub:
@@ -562,7 +571,7 @@ void ARMMachineInstructionRaiser::emitSDNode(
   case Shl:
   case AShr:
   case LShr:
-    emitBinary(FuncInfo, BB, Node);
+    emitBinary(FuncInfo, BB, MI);
     break;
   case Load: {
     Value *S = getIRValue(FuncInfo, Node->getOperand(0));
@@ -574,8 +583,8 @@ void ARMMachineInstructionRaiser::emitSDNode(
           S, Node->getValueType(0).getTypeForEVT(Ctx)->getPointerTo());
 
     Value *Inst = nullptr;
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
+    if (NPI->HasCPSR) {
+      unsigned CondValue = NPI->Cond;
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
@@ -591,7 +600,7 @@ void ARMMachineInstructionRaiser::emitSDNode(
             getDefaultType(), Ptr,
             MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
 
-      PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+      PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                           dyn_cast<Instruction>(Inst));
       FuncInfo->setRealValue(Node, Phi);
       FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -651,15 +660,14 @@ void ARMMachineInstructionRaiser::emitSDNode(
       Ptr = IRB.CreateIntToPtr(S, Nty->getPointerTo());
     }
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
+    if (NPI->HasCPSR) {
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
       BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
       // Emit the condition code.
-      emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
       IRB.SetInsertPoint(IfBB);
 
       IRB.CreateAlignedStore(Val, Ptr,
@@ -705,7 +713,10 @@ void ARMMachineInstructionRaiser::emitSDNode(
 }
 
 void ARMMachineInstructionRaiser::emitSpecialNode(
-    FunctionRaisingInfo *FuncInfo, BasicBlock *BB, SDNode *Node) {
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+    const MachineInstr &MI) {
+  auto *NPI = FuncInfo->NPMap[&MI];
+  auto *Node = NPI->Node;
   unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   auto *DLT = &M->getDataLayout();
@@ -756,9 +767,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     if (CallFunc == nullptr) {
       // According to MI to get BL instruction address.
       // uint64_t callAddr = FuncInfo->NPMap[Node]->InstAddr;
-      auto *MI = FuncInfo->NPMap[Node]->MI;
       uint64_t CallAddr = MR->getTextSectionAddress() +
-                          getMCInstIndex(*MI);
+                          getMCInstIndex(MI);
       auto *ArmMR =
           const_cast<ARMModuleRaiser *>(dyn_cast<ARMModuleRaiser>(MR));
       Function *IndefiniteFunc = ArmMR->getCallFunc(CallAddr);
@@ -878,10 +888,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, 32, true);
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      if (NPI->UpdateCPSR) {
         Value *InstSub = IRB.CreateSub(Val, S1);
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
@@ -897,13 +905,13 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(Val, S1);
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -924,10 +932,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Type *Ty = getDefaultType();
     Value *Val1 = ConstantInt::get(Ty, 1, true);
     Value *Val2 = ConstantInt::get(Ty, 31, true);
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      if (NPI->UpdateCPSR) {
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag =
             callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
@@ -950,7 +956,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag = nullptr;
@@ -960,7 +966,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -984,10 +990,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, -1, true);
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      if (NPI->UpdateCPSR) {
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
 
@@ -1006,11 +1010,11 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Emit the condition code.
-        emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -1029,8 +1033,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
   case ARMISD::CMN: {
     Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
     Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
+    if (NPI->HasCPSR) {
+      unsigned CondValue = NPI->Cond;
       HANDLE_EMIT_CONDCODE_COMMON(Add)
       emitCPSR(FuncInfo, S0, S1, IfBB, 0);
       IRB.CreateBr(ElseBB);
@@ -1073,8 +1077,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
     Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
+    if (NPI->HasCPSR) {
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
@@ -1084,7 +1087,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
       // Not change def. Consider how to use PHI.
       // PHINode *Phi = createAndEmitPHINode(Node, BB, ElseBB);
 
-      emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateAnd(S0, S1);
       emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
@@ -1100,10 +1103,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Value *S2 = getIRValue(FuncInfo, Node->getOperand(1));
     Type *Ty = getDefaultType();
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      if (NPI->UpdateCPSR) {
         Value *InstSub = IRB.CreateSub(S1, S2);
         Value *CFlag = nullptr;
         CFlag =
@@ -1120,7 +1121,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
-        emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
 
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(S1, S2);
@@ -1129,7 +1130,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
             callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *Inst = IRB.CreateAdd(InstSub, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -1151,8 +1152,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
     Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
+    if (NPI->HasCPSR) {
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
@@ -1161,7 +1161,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
       // TODO:
       // This instruction not change def, consider phi later.
 
-      emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateXor(S0, S1);
       emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
@@ -1251,10 +1251,8 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
     Type *OperandTy = getDefaultType();
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      if (NPI->UpdateCPSR) {
         // Create add emit.
         Value *CFlag =
             callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
@@ -1279,7 +1277,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
 
         Value *CFlag =
             callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
@@ -1287,7 +1285,7 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
         Value *InstAdd = IRB.CreateAdd(S0, S1);
         Value *CZext = IRB.CreateZExtOrTrunc(CFlag, OperandTy);
         Value *Inst = IRB.CreateAdd(InstAdd, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, Node, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -1335,9 +1333,9 @@ void ARMMachineInstructionRaiser::emitSpecialNode(
     Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
     Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
 
-    if (FuncInfo->NPMap[Node]->HasCPSR) {
-      unsigned CondValue = FuncInfo->NPMap[Node]->Cond;
-      if (FuncInfo->NPMap[Node]->UpdateCPSR) {
+    if (NPI->HasCPSR) {
+      unsigned CondValue = NPI->Cond;
+      if (NPI->UpdateCPSR) {
         // Create add emit.
         Value *Inst = IRB.CreateSub(S0, S1);
         FuncInfo->setRealValue(Node, Inst);

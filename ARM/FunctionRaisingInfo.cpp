@@ -54,20 +54,20 @@ SDValue FunctionRaisingInfo::getValFromRegMap(SDValue Val) {
 void FunctionRaisingInfo::clear() {
   MBBMap.clear();
   ValueMap.clear();
-  VisitedBBs.clear();
   RegValMap.clear();
   ArgValMap.clear();
   NodeRegMap.clear();
   AllocaMap.clear();
   RetValMap.clear();
   NPMap.clear();
+  VMap.clear();
 }
 
 /// Get the corresponding BasicBlock of given MachineBasicBlock.
 /// If does not give a MachineBasicBlock, it will create a new BasicBlock
 /// on current Function, and returns it.
 BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
-  Function *Fn = getCRF();
+  // Function *Fn = getCRF();
   if (MBB == nullptr)
     return BasicBlock::Create(Fn->getContext(), "", Fn);
 
@@ -90,16 +90,16 @@ BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
 /// Gets the related IR Value of given SDNode.
 Value *FunctionRaisingInfo::getRealValue(SDNode *Node) {
   assert(Node != nullptr && "Node cannot be nullptr!");
-  assert(NPMap[Node] != nullptr &&
+  assert(VMap[Node] != nullptr &&
          "Cannot find the corresponding node property!");
-  return NPMap[Node]->Val;
+  return VMap[Node];
 }
 
 /// Set the related IR Value to SDNode.
-void FunctionRaisingInfo::setRealValue(SDNode *N, Value *V) {
-  if (NPMap.count(N) == 0)
-    NPMap[N] = new NodePropertyInfo();
-  if (!NPMap[N])
-    NPMap[N] = new NodePropertyInfo();
-  NPMap[N]->Val = V;
+void FunctionRaisingInfo::setRealValue(SDNode *Node, Value *V) {
+//  if (VMap.count(Node) == 0)
+//    NPMap[&MI] = new NodePropertyInfo();
+//  if (!NPMap[&MI])
+//    NPMap[&MI] = new NodePropertyInfo();
+  VMap[Node] = V;
 }
