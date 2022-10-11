@@ -361,7 +361,7 @@ Type *ARMMachineInstructionRaiser::getIntTypeByPtr(Type *PTy) {
                                                                                \
   Value *Inst = BinaryOperator::Create##OPC(S0, S1);                           \
   IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));                  \
-  PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,        \
+  PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,          \
                                       dyn_cast<Instruction>(Inst));            \
   FuncInfo->setRealValue(Node, Phi);                                           \
   FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
@@ -457,15 +457,14 @@ void ARMMachineInstructionRaiser::emitBinaryCPSR(
 
 void ARMMachineInstructionRaiser::emitBinary(
     FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-    const MachineInstr &MI) {
+    unsigned Opcode, const MachineInstr &MI) {
   auto *NPI = FuncInfo->NPMap[&MI];
   auto *Node = NPI->Node;
-  unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
   Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
 
-  int InstOpc = raiseISDOpcodeToInstruction(Opc);
+  int InstOpc = raiseISDOpcodeToInstruction(Opcode);
 
   switch (InstOpc) {
 #define HANDLE_BINARY(OPCODE)                                                  \
@@ -528,829 +527,210 @@ static uint64_t getMCInstIndex(const MachineInstr &MI) {
 void ARMMachineInstructionRaiser::emitInstr(
     FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
     const MachineInstr &MI) {
-  SDNode *Node = visit(FuncInfo, MI);
-  SDNode *SelNode = selectCode(FuncInfo, BB, MI);
-  if (SelNode) {
-    emitSDNode(FuncInfo, BB, MI);
-  }
+  selectCode(FuncInfo, BB, MI);
 }
 
-/// Generate SDNode code for a target-independent node.
-/// Emit SDNode to Instruction and add to BasicBlock.
-/// 1. Map ISD opcode to Instruction opcode.
-/// 2. Abstract node to instruction.
-void ARMMachineInstructionRaiser::emitSDNode(
+void ARMMachineInstructionRaiser::emitLoad(
     FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
     const MachineInstr &MI) {
   auto *NPI = FuncInfo->NPMap[&MI];
   auto *Node = NPI->Node;
-  unsigned Opc = Node->getOpcode();
+  //unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   auto *DLT = &M->getDataLayout();
   IRB.SetCurrentDebugLocation(Node->getDebugLoc());
 
-  // Mapping ISD opcode to Instruction opcode.
-  int InstOpc = raiseISDOpcodeToInstruction(Opc);
+  Value *S = getIRValue(FuncInfo, Node->getOperand(0));
+  Value *Ptr = nullptr;
+  if (S->getType()->isPointerTy())
+    Ptr = S;
+  else
+    Ptr = IRB.CreateIntToPtr(
+        S, Node->getValueType(0).getTypeForEVT(Ctx)->getPointerTo());
 
-  enum InstructionOpcodes {
-#define HANDLE_INST(NUM, OPCODE, CLASS) OPCODE = NUM,
-#define LAST_OTHER_INST(NUM) InstructionOpcodesCount = NUM
-#include "llvm/IR/Instruction.def"
-  };
+  Value *Inst = nullptr;
+  if (NPI->HasCPSR) {
+    unsigned CondValue = NPI->Cond;
+    // Create new BB for EQ instruction execute.
+    BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    // Create new BB to update the DAG BB.
+    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
-  switch (InstOpc) {
-  default:
-    emitSpecialNode(FuncInfo, BB, MI);
-    break;
-  case Add:
-  case Sub:
-  case Mul:
-  case And:
-  case Or:
-  case Xor:
-  case Shl:
-  case AShr:
-  case LShr:
-    emitBinary(FuncInfo, BB, MI);
-    break;
-  case Load: {
-    Value *S = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *Ptr = nullptr;
-    if (S->getType()->isPointerTy())
-      Ptr = S;
+    // Emit the condition code.
+    emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
+    IRB.SetInsertPoint(IfBB);
+    if (GlobalVariable::classof(Ptr))
+      Inst = IRB.CreatePtrToInt(Ptr, getDefaultType());
     else
-      Ptr = IRB.CreateIntToPtr(
-          S, Node->getValueType(0).getTypeForEVT(Ctx)->getPointerTo());
+      Inst = callCreateAlignedLoad(BB,
+                                   getDefaultType(), Ptr,
+                                   MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
 
-    Value *Inst = nullptr;
-    if (NPI->HasCPSR) {
-      unsigned CondValue = NPI->Cond;
-      // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-      // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
+                                        dyn_cast<Instruction>(Inst));
+    FuncInfo->setRealValue(Node, Phi);
+    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
 
-      // Emit the condition code.
-      emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);
-      IRB.SetInsertPoint(IfBB);
-      if (GlobalVariable::classof(Ptr))
+    IRB.CreateBr(ElseBB);
+    IRB.SetInsertPoint(ElseBB);
+  } else {
+    if (GlobalVariable::classof(Ptr)) {
+      auto *Glob = cast<GlobalVariable>(Ptr);
+      // Inst = IRB.CreatePtrToInt(Ptr, getDefaultType());
+      // Inst = new PtrToIntInst(Ptr, getDefaultType(), "", BB);
+      Type *Ty = Glob->getValueType();
+      if (Ty->isArrayTy()) {
         Inst = IRB.CreatePtrToInt(Ptr, getDefaultType());
-      else
-        Inst = callCreateAlignedLoad(BB,
-            getDefaultType(), Ptr,
-            MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
-
-      PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                          dyn_cast<Instruction>(Inst));
-      FuncInfo->setRealValue(Node, Phi);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    } else {
-      if (GlobalVariable::classof(Ptr)) {
-        auto *Glob = cast<GlobalVariable>(Ptr);
-        // Inst = IRB.CreatePtrToInt(Ptr, getDefaultType());
-        // Inst = new PtrToIntInst(Ptr, getDefaultType(), "", BB);
-        Type *Ty = Glob->getValueType();
-        if (Ty->isArrayTy()) {
-          Inst = IRB.CreatePtrToInt(Ptr, getDefaultType());
-          //Ty = Ty->getArrayElementType();
-          //Ptr->mutateType(PointerType::getUnqual(Ty));
-        } else {
-          // if (Ty->isAggregateType()) {}
-          auto *Pty = cast<PointerType>(Ptr->getType());
-          if (Pty->isOpaqueOrPointeeTypeMatches(Ty))
-            Inst = IRB.CreateLoad(Ty, Ptr);
-        }
+        //Ty = Ty->getArrayElementType();
+        //Ptr->mutateType(PointerType::getUnqual(Ty));
       } else {
-        Type *ElemTy = getIntTypeByPtr(Ptr->getType());
-        Inst = callCreateAlignedLoad(BB,
-            ElemTy, Ptr, MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
-
-        // TODO:
-        // Temporary method for this.
-        if (Inst->getType() == Type::getInt64Ty(Ctx))
-          Inst = IRB.CreateTrunc(Inst, getDefaultType());
-        else if (Inst->getType() != getDefaultType())
-          Inst = IRB.CreateSExt(Inst, getDefaultType());
-      }
-
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-    }
-  } break;
-  case Store: {
-    Value *Val = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S = getIRValue(FuncInfo, Node->getOperand(1));
-    Value *Ptr = nullptr;
-    Type *Nty = Node->getValueType(0).getTypeForEVT(Ctx);
-
-    if (Val->getType() != Nty) {
-      Val = IRB.CreateTrunc(Val, Nty);
-    }
-
-    if (S->getType()->isPointerTy()) {
-      if (S->getType() != Nty->getPointerTo()) {
-        Ptr = IRB.CreateBitCast(S, Nty->getPointerTo());
-      } else {
-        Ptr = S;
+        // if (Ty->isAggregateType()) {}
+        auto *Pty = cast<PointerType>(Ptr->getType());
+        if (Pty->isOpaqueOrPointeeTypeMatches(Ty))
+          Inst = IRB.CreateLoad(Ty, Ptr);
       }
     } else {
-      Ptr = IRB.CreateIntToPtr(S, Nty->getPointerTo());
+      Type *ElemTy = getIntTypeByPtr(Ptr->getType());
+      Inst = callCreateAlignedLoad(BB,
+                                   ElemTy, Ptr, MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
+
+      // TODO:
+      // Temporary method for this.
+      if (Inst->getType() == Type::getInt64Ty(Ctx))
+        Inst = IRB.CreateTrunc(Inst, getDefaultType());
+      else if (Inst->getType() != getDefaultType())
+        Inst = IRB.CreateSExt(Inst, getDefaultType());
     }
 
-    if (NPI->HasCPSR) {
-      // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-      // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-      // Emit the condition code.
-      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-      IRB.SetInsertPoint(IfBB);
-
-      IRB.CreateAlignedStore(Val, Ptr,
-                             MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
-
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    } else {
-      IRB.CreateAlignedStore(Val, Ptr,
-                             MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
-    }
-  } break;
-  case ICmp: {
-    Value *LHS = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *RHS = getIRValue(FuncInfo, Node->getOperand(1));
-
-    Value *InstNot = nullptr;
-    if (ConstantSDNode::classof(Node->getOperand(1).getNode())) {
-      Value *InstTp = IRB.CreateSub(LHS, LHS);
-      Value *InstAdd = IRB.CreateAdd(InstTp, RHS);
-      InstNot = IRB.CreateNot(InstAdd);
-    } else {
-      InstNot = IRB.CreateNot(RHS);
-    }
-    emitCPSR(FuncInfo, LHS, InstNot, BB, 1);
-  } break;
-  case FCmp: {
-    Value *LHS = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *RHS = getIRValue(FuncInfo, Node->getOperand(1));
-
-    Value *InstNot = nullptr;
-    if (ConstantSDNode::classof(Node->getOperand(1).getNode())) {
-      Value *InstTp = IRB.CreateSub(LHS, LHS);
-      Value *InstAdd = IRB.CreateAdd(InstTp, RHS);
-      InstNot = IRB.CreateNot(InstAdd);
-    } else {
-      InstNot = IRB.CreateNot(RHS);
-    }
-
-    emitCPSR(FuncInfo, LHS, InstNot, BB, 1);
-  } break;
+    FuncInfo->setRealValue(Node, Inst);
+    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
   }
 }
 
-void ARMMachineInstructionRaiser::emitSpecialNode(
+void ARMMachineInstructionRaiser::emitStore(
     FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
     const MachineInstr &MI) {
   auto *NPI = FuncInfo->NPMap[&MI];
   auto *Node = NPI->Node;
-  unsigned Opc = Node->getOpcode();
+  //unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   auto *DLT = &M->getDataLayout();
+  IRB.SetCurrentDebugLocation(Node->getDebugLoc());
 
-  switch (Opc) {
-  default:
-    // assert(false && "Unknown SDNode Type!");
-    break;
-  case EXT_ARMISD::BX_RET: {
-    Value *Ret = getIRValue(FuncInfo, Node->getOperand(0));
-    if (!ConstantSDNode::classof(Node->getOperand(0).getNode()))
-      IRB.CreateRet(Ret);
-    else
-      IRB.CreateRetVoid();
-  } break;
-  // TODO:
-  // Specical instruction we do here. e.g Br Invoke IndirectBr ..
-  case ISD::BRCOND: {
-    unsigned Cond = cast<ConstantSDNode>(Node->getOperand(1))->getZExtValue();
-    // br i1 %cmp, label %if.then, label %if.else
-    MachineBasicBlock *MBB = FuncInfo->MBBMap[BB];
-    MachineBasicBlock::succ_iterator SuI = MBB->succ_begin();
-    BasicBlock *Iftrue = FuncInfo->getOrCreateBasicBlock(*SuI);
-    MachineBasicBlock *NextMBB = &*std::next(MBB->getIterator());
-    BasicBlock *NextBB = FuncInfo->getOrCreateBasicBlock(NextMBB);
+  Value *Val = getIRValue(FuncInfo, Node->getOperand(0));
+  Value *S = getIRValue(FuncInfo, Node->getOperand(1));
+  Value *Ptr = nullptr;
+  Type *Nty = Node->getValueType(0).getTypeForEVT(Ctx);
 
-    emitCondCode(FuncInfo, Cond, BB, Iftrue, NextBB);
-  } break;
-  case ISD::BR: {
-    // br label %xxx
-    MachineBasicBlock *LMBB = FuncInfo->MBBMap[BB];
-    MachineBasicBlock::succ_iterator SuI = LMBB->succ_begin();
-    if (SuI != LMBB->succ_end()) {
-      BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
-      IRB.CreateBr(BrDest);
-      break;
-    }
-    LLVM_FALLTHROUGH;
+  if (Val->getType() != Nty) {
+    Val = IRB.CreateTrunc(Val, Nty);
   }
-  case EXT_ARMISD::BRD: {
-    // Get the function call Index.
-    uint64_t Index = Node->getConstantOperandVal(0);
-    // Get function from ModuleRaiser.
-    Function *CallFunc = MR->getRaisedFunctionAt(Index);
-    unsigned IFFuncArgNum = 0; // The argument number which gets from analyzing
-                               // variadic function prototype.
-    bool IsSyscall = false;
-    if (CallFunc == nullptr) {
-      // According to MI to get BL instruction address.
-      // uint64_t callAddr = FuncInfo->NPMap[Node]->InstAddr;
-      uint64_t CallAddr = MR->getTextSectionAddress() +
-                          getMCInstIndex(MI);
-      auto *ArmMR =
-          const_cast<ARMModuleRaiser *>(dyn_cast<ARMModuleRaiser>(MR));
-      Function *IndefiniteFunc = ArmMR->getCallFunc(CallAddr);
-      CallFunc = ArmMR->getSyscallFunc(Index);
-      if (CallFunc != nullptr && IndefiniteFunc != nullptr) {
-        IFFuncArgNum = ArmMR->getFunctionArgNum(CallAddr);
-        IsSyscall = true;
-      }
-    }
-    assert(CallFunc && "Failed to get called function!");
-    // Get argument number from callee.
-    unsigned ArgNum = CallFunc->arg_size();
-    if (IFFuncArgNum > ArgNum)
-      ArgNum = IFFuncArgNum;
-    Argument *CalledFuncArgs = CallFunc->arg_begin();
-    std::vector<Value *> CallInstFuncArgs;
-    CallInst *Inst = nullptr;
-    if (ArgNum > 0) {
-      Value *ArgVal = nullptr;
-      const MachineFrameInfo &MFI = FuncInfo->MF->getFrameInfo();
-      unsigned StackArg = 0; // Initialize argument size on stack to 0.
-      if (ArgNum > 4) {
-        StackArg = ArgNum - 4;
 
-        unsigned StackNum = MFI.getNumObjects() - 2;
-        if (StackNum > StackArg)
-          StackArg = StackNum;
-      }
-      for (unsigned Idx = 0; Idx < ArgNum; Idx++) {
-        if (Idx < 4)
-          ArgVal = FuncInfo->ArgValMap[ARM::R0 + Idx];
-        else {
-          const AllocaInst *StackAlloc =
-              MFI.getObjectAllocation(StackArg - Idx - 4 + 1);
-          ArgVal = callCreateAlignedLoad(BB,
-              const_cast<AllocaInst *>(StackAlloc),
-              MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
-        }
-        if (IsSyscall && Idx < CallFunc->arg_size() &&
-            ArgVal->getType() != CalledFuncArgs[Idx].getType()) {
-          CastInst *CInst = CastInst::Create(
-              CastInst::getCastOpcode(ArgVal, false,
-                                      CalledFuncArgs[Idx].getType(), false),
-              ArgVal, CalledFuncArgs[Idx].getType());
-          IRB.GetInsertBlock()->getInstList().push_back(CInst);
-          ArgVal = CInst;
-        }
-        CallInstFuncArgs.push_back(ArgVal);
-      }
-      Inst = IRB.CreateCall(CallFunc, ArrayRef<Value *>(CallInstFuncArgs));
-    } else
-      Inst = IRB.CreateCall(CallFunc);
-
-    FuncInfo->setRealValue(Node, Inst);
-  } break;
-  case ISD::BRIND: {
-    Value *Func = getIRValue(FuncInfo, Node->getOperand(0));
-    unsigned NumDests = Node->getNumOperands();
-    IRB.CreateIndirectBr(Func, NumDests);
-  } break;
-  case ISD::BR_JT: {
-    // Emit the switch instruction.
-    if (JTList.size() > 0) {
-      MachineBasicBlock *Mbb = FuncInfo->MBBMap[BB];
-      MachineFunction *MF = Mbb->getParent();
-
-      std::vector<JumpTableBlock> JTCases;
-      const MachineJumpTableInfo *MJT = MF->getJumpTableInfo();
-      unsigned JTIndex = Node->getConstantOperandVal(0);
-      std::vector<MachineJumpTableEntry> JumpTables = MJT->getJumpTables();
-      for (unsigned Idx = 0, MBBSz = JumpTables[JTIndex].MBBs.size(); Idx != MBBSz; ++Idx) {
-        llvm::Type *I32Type = llvm::IntegerType::getInt32Ty(Ctx);
-        llvm::ConstantInt *I32Val =
-            cast<ConstantInt>(llvm::ConstantInt::get(I32Type, Idx, true));
-        MachineBasicBlock *Succ = JumpTables[JTIndex].MBBs[Idx];
-        ConstantInt *CaseVal = I32Val;
-        JTCases.push_back(std::make_pair(CaseVal, Succ));
-      }
-      // main->getEntryBlock().setName("entry");
-
-      unsigned int NumCases = JTCases.size();
-      BasicBlock *DefBB =
-          FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].DefaultMBB);
-
-      BasicBlock *CondBB =
-          FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].ConditionMBB);
-
-      // condition instruction
-      Instruction *CondInst = nullptr;
-      for (BasicBlock::iterator DI = CondBB->begin(); DI != CondBB->end(); DI++) {
-        Instruction *Ins = dyn_cast<Instruction>(DI);
-        if (isa<LoadInst>(DI) && !CondInst) {
-          CondInst = Ins;
-        }
-
-        if (CondInst && (Ins->getOpcode() == Instruction::Sub)) {
-          if (isa<ConstantInt>(Ins->getOperand(1))) {
-            ConstantInt *IntOp = dyn_cast<ConstantInt>(Ins->getOperand(1));
-            if (IntOp->uge(0)) {
-              CondInst = Ins;
-            }
-          }
-        }
-      }
-
-      SwitchInst *Inst = IRB.CreateSwitch(CondInst, DefBB, NumCases);
-      for (unsigned Idx = 0, Cnt = NumCases; Idx != Cnt; ++Idx) {
-        BasicBlock *CaseBB =
-            FuncInfo->getOrCreateBasicBlock(JTCases[Idx].second);
-        Inst->addCase(JTCases[Idx].first, CaseBB);
-      }
-    }
-  } break;
-  case ISD::ROTR: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    Type *Ty = getDefaultType();
-    Value *Val = ConstantInt::get(Ty, 32, true);
-
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        Value *InstSub = IRB.CreateSub(Val, S1);
-        Value *InstLShr = IRB.CreateLShr(S0, S1);
-        Value *InstShl = IRB.CreateShl(S0, InstSub);
-        Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        FuncInfo->setRealValue(Node, Inst);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
-      } else {
-        // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-        // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-        IRB.SetInsertPoint(IfBB);
-        Value *InstSub = IRB.CreateSub(Val, S1);
-        Value *InstLShr = IRB.CreateLShr(S0, S1);
-        Value *InstShl = IRB.CreateShl(S0, InstSub);
-        Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
+  if (S->getType()->isPointerTy()) {
+    if (S->getType() != Nty->getPointerTo()) {
+      Ptr = IRB.CreateBitCast(S, Nty->getPointerTo());
     } else {
-      Value *InstSub = IRB.CreateSub(Val, S1);
-      Value *InstLShr = IRB.CreateLShr(S0, S1);
-      Value *InstShl = IRB.CreateShl(S0, InstSub);
-      Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
+      Ptr = S;
     }
-  } break;
-  case ARMISD::RRX: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Type *Ty = getDefaultType();
-    Value *Val1 = ConstantInt::get(Ty, 1, true);
-    Value *Val2 = ConstantInt::get(Ty, 31, true);
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        Value *InstLShr = IRB.CreateLShr(S0, Val1);
-        Value *CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        CFlag = IRB.CreateZExt(CFlag, Ty);
-        Value *Bit31 = IRB.CreateShl(CFlag, Val2);
-        Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        FuncInfo->setRealValue(Node, Inst);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-
-        /**************************************/
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
-        // Update C flag.
-        // c flag = s0[0]
-        CFlag = IRB.CreateAnd(S0, Val1);
-        IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
-      } else {
-        // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-        // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-        IRB.SetInsertPoint(IfBB);
-        Value *InstLShr = IRB.CreateLShr(S0, Val1);
-        Value *CFlag = nullptr;
-
-        CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        CFlag = IRB.CreateZExt(CFlag, Ty);
-        Value *Bit31 = IRB.CreateShl(CFlag, Val2);
-        Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
-    } else {
-      Value *InstLShr = IRB.CreateLShr(S0, Val1);
-      Value *CFlag =
-          callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-      CFlag = IRB.CreateZExt(CFlag, Ty);
-      Value *Bit31 = IRB.CreateShl(CFlag, Val2);
-      Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-    }
-  } break;
-  case EXT_ARMISD::BIC: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    Type *Ty = getDefaultType();
-    Value *Val = ConstantInt::get(Ty, -1, true);
-
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        Value *InstXor = IRB.CreateXor(Val, S1);
-        Value *Inst = IRB.CreateAnd(S0, InstXor);
-
-        FuncInfo->setRealValue(Node, Inst);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
-        // Update C flag.
-        // C flag not change.
-
-        // Update V flag.
-        // unchanged.
-      } else {
-        // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-        IRB.SetInsertPoint(IfBB);
-        Value *InstXor = IRB.CreateXor(Val, S1);
-        Value *Inst = IRB.CreateAnd(S0, InstXor);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
-    } else {
-      Value *InstXor, *Inst;
-      InstXor = IRB.CreateXor(Val, S1);
-      Inst = IRB.CreateAnd(S0, InstXor);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-    }
-  } break;
-  case ARMISD::CMN: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    if (NPI->HasCPSR) {
-      unsigned CondValue = NPI->Cond;
-      HANDLE_EMIT_CONDCODE_COMMON(Add)
-      emitCPSR(FuncInfo, S0, S1, IfBB, 0);
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    } else {
-      Value *Inst = IRB.CreateAdd(S0, S1);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-      emitCPSR(FuncInfo, S0, S1, BB, 0);
-    }
-  } break;
-  case ISD::CTLZ: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Function *CTLZ = Intrinsic::getDeclaration(BB->getParent()->getParent(),
-                                               Intrinsic::ctlz, S0->getType());
-    Type *I1ype = llvm::IntegerType::getInt1Ty(Ctx);
-    Value *IsZeroUndef = ConstantInt::get(I1ype, true, true);
-
-    std::vector<Value *> Vec;
-    Vec.push_back(S0);
-    Vec.push_back(IsZeroUndef);
-    ArrayRef<Value *> Args(Vec);
-
-    Value *Inst = IRB.CreateCall(CTLZ, Args);
-    FuncInfo->setRealValue(Node, Inst);
-    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-  } break;
-  case EXT_ARMISD::MLA: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    Value *S2 = getIRValue(FuncInfo, Node->getOperand(2));
-
-    Value *InstMul = IRB.CreateMul(S0, S1);
-    Value *Inst = IRB.CreateAdd(InstMul, S2);
-
-    FuncInfo->setRealValue(Node, Inst);
-    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-  } break;
-  case EXT_ARMISD::TST: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-
-    if (NPI->HasCPSR) {
-      // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-      // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-      // TODO:
-      // Not change def. Consider how to use PHI.
-      // PHINode *Phi = createAndEmitPHINode(Node, BB, ElseBB);
-
-      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-      IRB.SetInsertPoint(IfBB);
-      Value *Inst = IRB.CreateAnd(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    } else {
-      Value *Inst = IRB.CreateAnd(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, BB, 0);
-    }
-  } break;
-  case EXT_ARMISD::SBC: {
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S2 = getIRValue(FuncInfo, Node->getOperand(1));
-    Type *Ty = getDefaultType();
-
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        Value *InstSub = IRB.CreateSub(S1, S2);
-        Value *CFlag = nullptr;
-        CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        Value *CZext = IRB.CreateZExt(CFlag, Ty);
-        Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
-        FuncInfo->setRealValue(Node, InstSBC);
-        Value *InstNot = IRB.CreateNot(S2);
-        if (1)
-          emitCPSR(FuncInfo, S1, InstNot, BB, 0);
-        else
-          emitCPSR(FuncInfo, S1, InstNot, BB, 1);
-      } else {
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-
-        IRB.SetInsertPoint(IfBB);
-        Value *InstSub = IRB.CreateSub(S1, S2);
-        Value *CFlag = nullptr;
-        CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        Value *CZext = IRB.CreateZExt(CFlag, Ty);
-        Value *Inst = IRB.CreateAdd(InstSub, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
-    } else {
-      Value *InstSub = IRB.CreateSub(S1, S2);
-      Value *CFlag = nullptr;
-      CFlag =
-          callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-      Value *CZext = IRB.CreateZExt(CFlag, Ty);
-      Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
-      FuncInfo->setRealValue(Node, InstSBC);
-    }
-  } break;
-  case EXT_ARMISD::TEQ: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-
-    if (NPI->HasCPSR) {
-      // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-      // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-      // TODO:
-      // This instruction not change def, consider phi later.
-
-      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-      IRB.SetInsertPoint(IfBB);
-      Value *Inst = IRB.CreateXor(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    } else {
-      Value *Inst = IRB.CreateXor(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, BB, 0);
-    }
-  } break;
-  case EXT_ARMISD::MSR: {
-    Value *Cond = getIRValue(FuncInfo, Node->getOperand(0));
-    // 1 1 1 1
-    // N set 1 0 0 0   8
-    // Z set 0 1 0 0   4
-    // C set 0 0 1 0   2
-    // Z set 0 0 0 1   1
-    IRB.CreateStore(Cond, dyn_cast<Value>(M->getGlobalVariable("Reserved")));
-    // Pattern msr CPSR_f, Rn
-    if (1) {
-      Value *ShiftNum = IRB.getInt32(28);
-      Value *Shift = IRB.CreateLShr(Cond, ShiftNum);
-      // Update N Flag.
-      Value *NCmp = IRB.getInt32(8);
-      Value *NFlag = IRB.CreateICmpEQ(Shift, NCmp);
-      IRB.CreateStore(NFlag, FuncInfo->AllocaMap[0]);
-      // Update Z Flag.
-      Value *ZCmp = IRB.getInt32(4);
-      Value *ZFlag = IRB.CreateICmpEQ(Shift, ZCmp);
-      IRB.CreateStore(ZFlag, FuncInfo->AllocaMap[1]);
-      // Update C Flag.
-      Value *CCmp = IRB.getInt32(2);
-      Value *CFlag = IRB.CreateICmpEQ(Shift, CCmp);
-      IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
-      // Update V Flag.
-      Value *VCmp = IRB.getInt32(1);
-      Value *VFlag = IRB.CreateICmpEQ(Shift, VCmp);
-      IRB.CreateStore(VFlag, FuncInfo->AllocaMap[3]);
-    } else {
-      // Pattern msr CSR_f, #const.
-    }
-  } break;
-  case EXT_ARMISD::MRS: {
-    Value *Rn = getIRValue(FuncInfo, Node->getOperand(0));
-    // Reserved || N_Flag << 31 || Z_Flag << 30 || C_Flag << 29 || V_Flag << 28
-    PointerType *PtrTy = PointerType::getInt32PtrTy(Ctx);
-    Type *Ty = Type::getInt32Ty(Ctx);
-
-    Value *BitNShift = IRB.getInt32(31);
-    Value *BitZShift = IRB.getInt32(30);
-    Value *BitCShift = IRB.getInt32(29);
-    Value *BitVShift = IRB.getInt32(28);
-
-    Value *NFlag =
-        callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[0]));
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[1]));
-    Value *CFlag =
-        callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-    Value *VFlag =
-        callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[3]));
-
-    NFlag = IRB.CreateZExt(NFlag, Ty);
-    ZFlag = IRB.CreateZExt(ZFlag, Ty);
-    CFlag = IRB.CreateZExt(CFlag, Ty);
-    VFlag = IRB.CreateZExt(VFlag, Ty);
-
-    Value *NShift = IRB.CreateShl(NFlag, BitNShift);
-    Value *ZShift = IRB.CreateShl(ZFlag, BitZShift);
-    Value *CShift = IRB.CreateShl(CFlag, BitCShift);
-    Value *VShift = IRB.CreateShl(VFlag, BitVShift);
-    Value *NZVal = IRB.CreateAdd(NShift, ZShift);
-    Value *CVVal = IRB.CreateAdd(CShift, VShift);
-    Value *NZCVVal = IRB.CreateAdd(NZVal, CVVal);
-    Value *Reserved =
-        callCreateAlignedLoad(BB, M->getGlobalVariable("Reserved"));
-
-    Value *CPSRVal = IRB.CreateAdd(NZCVVal, Reserved);
-    Value *RnPtr = IRB.CreateIntToPtr(Rn, PtrTy);
-    Value *RnStore = IRB.CreateStore(CPSRVal, RnPtr);
-
-    FuncInfo->setRealValue(Node, RnStore);
-    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = RnStore;
-  } break;
-  case ISD::ADDC: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    Type *OperandTy = getDefaultType();
-
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        // Create add emit.
-        Value *CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        Value *Result = IRB.CreateAdd(S0, S1);
-        Value *CZext = IRB.CreateZExt(CFlag, OperandTy);
-        Value *InstADC = IRB.CreateAdd(Result, CZext);
-        FuncInfo->setRealValue(Node, InstADC);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] =
-            dyn_cast<Instruction>(InstADC);
-
-        // Update CPSR.
-        // TODO:
-        // Should consider how to do this.
-        if (1)
-          emitCPSR(FuncInfo, S0, S1, BB, 1);
-        else
-          emitCPSR(FuncInfo, S0, S1, BB, 0);
-      } else {
-        // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-        // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-
-        Value *CFlag =
-            callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-        IRB.SetInsertPoint(IfBB);
-        Value *InstAdd = IRB.CreateAdd(S0, S1);
-        Value *CZext = IRB.CreateZExtOrTrunc(CFlag, OperandTy);
-        Value *Inst = IRB.CreateAdd(InstAdd, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Phi;
-
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
-    } else {
-      Value *CFlag =
-          callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-      Value *Inst = IRB.CreateAdd(S0, S1);
-      Value *CTrunc = IRB.CreateZExtOrTrunc(CFlag, getDefaultType());
-      Value *InstADC = IRB.CreateAdd(Inst, CTrunc);
-
-      FuncInfo->setRealValue(Node, InstADC);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = InstADC;
-    }
-  } break;
-  case EXT_ARMISD::RSC: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-
-    Value *CFlag =
-        callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(FuncInfo->AllocaMap[2]));
-    Value *CZext = IRB.CreateZExt(CFlag, getDefaultType());
-
-    Value *Inst = IRB.CreateAdd(S0, CZext);
-    Inst = IRB.CreateSub(S1, Inst);
-    FuncInfo->setRealValue(Node, Inst);
-    FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-  } break;
-  case EXT_ARMISD::UXTB: {
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-    Value *Rotation = getIRValue(FuncInfo, Node->getOperand(2));
-    Value *RorVal = ConstantInt::get(getDefaultType(), 8, true);
-    Value *AddVal = ConstantInt::get(getDefaultType(), 0, true);
-    Value *AndVal = ConstantInt::get(getDefaultType(), 0xff, true);
-    Value *InstMul = IRB.CreateMul(Rotation, RorVal);
-    Value *InstLshr = IRB.CreateLShr(S1, InstMul);
-    Value *InstAdd = IRB.CreateAdd(InstLshr, AddVal);
-    Value *InstAnd = IRB.CreateAnd(InstAdd, AndVal);
-    FuncInfo->setRealValue(Node, InstAnd);
-  } break;
-  case EXT_ARMISD::RSB: {
-    Value *S0 = getIRValue(FuncInfo, Node->getOperand(0));
-    Value *S1 = getIRValue(FuncInfo, Node->getOperand(1));
-
-    if (NPI->HasCPSR) {
-      unsigned CondValue = NPI->Cond;
-      if (NPI->UpdateCPSR) {
-        // Create add emit.
-        Value *Inst = IRB.CreateSub(S0, S1);
-        FuncInfo->setRealValue(Node, Inst);
-        FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-
-        Value *InstNot = IRB.CreateNot(S1);
-        emitCPSR(FuncInfo, InstNot, S0, BB, 1);
-      } else {
-        HANDLE_EMIT_CONDCODE(Sub)
-      }
-    } else {
-      Value *Inst = IRB.CreateSub(S0, S1);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->ArgValMap[FuncInfo->NodeRegMap[Node]] = Inst;
-    }
-  } break;
+  } else {
+    Ptr = IRB.CreateIntToPtr(S, Nty->getPointerTo());
   }
+
+  if (NPI->HasCPSR) {
+    // Create new BB for EQ instruction execute.
+    BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    // Create new BB to update the DAG BB.
+    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+
+    // Emit the condition code.
+    emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+    IRB.SetInsertPoint(IfBB);
+
+    IRB.CreateAlignedStore(Val, Ptr,
+                           MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
+
+    IRB.CreateBr(ElseBB);
+    IRB.SetInsertPoint(ElseBB);
+  } else {
+    IRB.CreateAlignedStore(Val, Ptr,
+                           MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
+  }
+}
+
+void ARMMachineInstructionRaiser::emitBRD(
+    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+    const MachineInstr &MI) {
+  auto *NPI = FuncInfo->NPMap[&MI];
+  auto *Node = NPI->Node;
+  // unsigned Opc = Node->getOpcode();
+  IRBuilder<> IRB(BB);
+  auto *DLT = &M->getDataLayout();
+  IRB.SetCurrentDebugLocation(Node->getDebugLoc());
+
+  // Get the function call Index.
+  uint64_t Index = Node->getConstantOperandVal(0);
+  // Get function from ModuleRaiser.
+  Function *CallFunc = MR->getRaisedFunctionAt(Index);
+  unsigned IFFuncArgNum = 0; // The argument number which gets from analyzing
+                             // variadic function prototype.
+  bool IsSyscall = false;
+  if (CallFunc == nullptr) {
+    // According to MI to get BL instruction address.
+    // uint64_t callAddr = FuncInfo->NPMap[Node]->InstAddr;
+    uint64_t CallAddr = MR->getTextSectionAddress() +
+                        getMCInstIndex(MI);
+    auto *ArmMR =
+        const_cast<ARMModuleRaiser *>(dyn_cast<ARMModuleRaiser>(MR));
+    Function *IndefiniteFunc = ArmMR->getCallFunc(CallAddr);
+    CallFunc = ArmMR->getSyscallFunc(Index);
+    if (CallFunc != nullptr && IndefiniteFunc != nullptr) {
+      IFFuncArgNum = ArmMR->getFunctionArgNum(CallAddr);
+      IsSyscall = true;
+    }
+  }
+  assert(CallFunc && "Failed to get called function!");
+  // Get argument number from callee.
+  unsigned ArgNum = CallFunc->arg_size();
+  if (IFFuncArgNum > ArgNum)
+    ArgNum = IFFuncArgNum;
+  Argument *CalledFuncArgs = CallFunc->arg_begin();
+  std::vector<Value *> CallInstFuncArgs;
+  CallInst *Inst = nullptr;
+  if (ArgNum > 0) {
+    Value *ArgVal = nullptr;
+    const MachineFrameInfo &MFI = FuncInfo->MF->getFrameInfo();
+    unsigned StackArg = 0; // Initialize argument size on stack to 0.
+    if (ArgNum > 4) {
+      StackArg = ArgNum - 4;
+
+      unsigned StackNum = MFI.getNumObjects() - 2;
+      if (StackNum > StackArg)
+        StackArg = StackNum;
+    }
+    for (unsigned Idx = 0; Idx < ArgNum; Idx++) {
+      if (Idx < 4)
+        ArgVal = FuncInfo->ArgValMap[ARM::R0 + Idx];
+      else {
+        const AllocaInst *StackAlloc =
+            MFI.getObjectAllocation(StackArg - Idx - 4 + 1);
+        ArgVal = callCreateAlignedLoad(BB,
+                                       const_cast<AllocaInst *>(StackAlloc),
+                                       MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
+      }
+      if (IsSyscall && Idx < CallFunc->arg_size() &&
+          ArgVal->getType() != CalledFuncArgs[Idx].getType()) {
+        CastInst *CInst = CastInst::Create(
+            CastInst::getCastOpcode(ArgVal, false,
+                                    CalledFuncArgs[Idx].getType(), false),
+            ArgVal, CalledFuncArgs[Idx].getType());
+        IRB.GetInsertBlock()->getInstList().push_back(CInst);
+        ArgVal = CInst;
+      }
+      CallInstFuncArgs.push_back(ArgVal);
+    }
+    Inst = IRB.CreateCall(CallFunc, ArrayRef<Value *>(CallInstFuncArgs));
+  } else
+    Inst = IRB.CreateCall(CallFunc);
+
+  FuncInfo->setRealValue(Node, Inst);
 }

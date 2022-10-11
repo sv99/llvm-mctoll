@@ -200,9 +200,6 @@ private:
   /// In DAG emitter, emitter get a value of use base on this defined Node.
   void recordDefinition(FunctionRaisingInfo *FuncInfo,
                         SDNode *OldNode, SDNode *NewNode);
-  /// Replace all uses of F with T, then remove F from the DAG.
-  void replaceNode(FunctionRaisingInfo *FuncInfo,
-                   const MachineInstr &MI, SDNode *F, SDNode *T);
   bool isTwoAddressMode(FunctionRaisingInfo *FuncInfo,
                         const MachineInstr &MI);
   /// Checks the SDNode is a function return or not.
@@ -221,16 +218,10 @@ private:
   /// Emit Instruction and add to BasicBlock.
   void emitInstr(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
                  const MachineInstr &MI);
-  /// Generate SDNode code for a target-independent node.
-  /// Emit SDNode to Instruction and add to BasicBlock.
-  void emitSDNode(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-                  const MachineInstr &MI);
-  void emitSpecialNode(FunctionRaisingInfo *FuncInfo,
-                       BasicBlock *BB, const MachineInstr &MI);
 
   /// Emit SDNodes of binary operations.
   void emitBinary(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-                  const MachineInstr &MI);
+                  unsigned Opcode, const MachineInstr &MI);
   void emitCondCode(FunctionRaisingInfo *FuncInfo, unsigned CondValue,
                     BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
   void emitBinaryCPSR(FunctionRaisingInfo *FuncInfo, Value *Inst,
@@ -241,6 +232,12 @@ private:
                 BasicBlock *BB, unsigned Flag);
   void emitSpecialCPSR(FunctionRaisingInfo *FuncInfo,
                        Value *Result, BasicBlock *BB, unsigned Flag);
+  void emitLoad(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                const MachineInstr &MI);
+  void emitStore(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+                 const MachineInstr &MI);
+  void emitBRD(FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
+               const MachineInstr &MI);
   /// Create PHINode for value use selection when running.
   PHINode *createAndEmitPHINode(FunctionRaisingInfo *FuncInfo,
                                 const MachineInstr &MI,
