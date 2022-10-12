@@ -194,19 +194,10 @@ private:
 
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
-  /// Record the new defined Node, it uses to map the register number to Node.
-  /// In DAG emitter, emitter get a value of use base on this defined Node.
-  void recordDefinition(FunctionRaisingInfo *FuncInfo,
-                        SDNode *OldNode, SDNode *NewNode);
-  /// Checks the SDNode is a function return or not.
-  bool isReturnNode(FunctionRaisingInfo *FuncInfo, SDNode *Node);
 
   /// visit - Collects the information of each MI to create SDNodes.
   SDNode *visit(FunctionRaisingInfo *FuncInfo,
                 const MachineInstr &MI);
-  /// Analyzes CPSR register information of MI to collect conditional
-  /// code properties.
-  NodePropertyInfo *CreateNPI(const MachineInstr &MI);
 
   // IR emitter
 
@@ -276,7 +267,6 @@ private:
 
   Type *getIntTypeByPtr(Type *PTy);
 
-  Value *getIRValue(FunctionRaisingInfo *FuncInfo, SDValue Val);
   // Wrapper to call new  Create*Load APIs
   //  LoadInst *callCreateAlignedLoad(Value *ValPtr,
   //                                  MaybeAlign Align = MaybeAlign()) {
@@ -294,13 +284,17 @@ private:
     return IRB.CreateAlignedLoad(ValPtr->getAllocatedType(),
                                  ValPtr, Align, "");
   }
+  LoadInst *callCreateAlignedLoad(BasicBlock *BB, Value *AllocaValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    return callCreateAlignedLoad(BB, dyn_cast<AllocaInst>(AllocaValPtr),
+                                 Align);
+  }
   LoadInst *callCreateAlignedLoad(BasicBlock *BB, GlobalValue *ValPtr,
                                   MaybeAlign Align = MaybeAlign()) {
     IRBuilder<> IRB(BB);
     return IRB.CreateAlignedLoad(ValPtr->getValueType(),
                                  ValPtr, Align, "");
   }
-
 };
 
 } // end namespace mctoll

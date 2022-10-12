@@ -52,11 +52,11 @@ bool ARMMachineInstructionRaiser::doSelection() {
   // will branch to this exit BasicBlock. This will lead to the function has
   // one and only exit. If the function has return value, this help return
   // R0.
-  Function *CurFn = const_cast<Function *>(FuncInfo->Fn);
+  Function *CurFn = FuncInfo->getRaisedFunction();
   BasicBlock *LBB = FuncInfo->getOrCreateBasicBlock();
 
   if (CurFn->getReturnType()) {
-    PHINode *LPHI = PHINode::Create(FuncInfo->getCRF()->getReturnType(),
+    PHINode *LPHI = PHINode::Create(FuncInfo->getRaisedFunction()->getReturnType(),
                                     FuncInfo->RetValMap.size(), "", LBB);
     for (auto Pair : FuncInfo->RetValMap)
       LPHI->addIncoming(Pair.second, Pair.first);
@@ -72,7 +72,7 @@ bool ARMMachineInstructionRaiser::doSelection() {
   // For debugging.
   LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(RaisedFunction->dump());
-    LLVM_DEBUG(dbgs() << "ARMSelectionDAGISel end.\n");
+  LLVM_DEBUG(dbgs() << "ARMSelectionDAGISel end.\n");
 
   return true;
 }
@@ -201,10 +201,10 @@ void ARMMachineInstructionRaiser::selectBasicBlock(
   // If the current function has return value, records relationship between
   // BasicBlock and each Value which is mapped with R0. In order to record
   // the return Value of each exit BasicBlock.
-  Type *RTy = FuncInfo->Fn->getReturnType();
+  Type *RTy = FuncInfo->getRaisedFunction()->getReturnType();
   if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
-    auto *Reg = FuncInfo->RegValMap[ARM::R0];
-    auto *Val = FuncInfo->getRealValue(Reg);
+    auto Reg = FuncInfo->getSDValueByRegister(ARM::R0);
+    auto *Val = FuncInfo->getRealValue(Reg.getNode());
     Instruction *TInst = dyn_cast<Instruction>(Val);
     assert(TInst && "A def R0 was pointed to a non-instruction!!!");
     BasicBlock *TBB = TInst->getParent();

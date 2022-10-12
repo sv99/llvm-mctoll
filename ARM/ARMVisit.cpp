@@ -54,14 +54,15 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
         VCtt.push_back(Evt);
       } else if (FuncInfo->isArgumentIndex(FI)) {
         Argument *V =
-            const_cast<Argument *>(FuncInfo->getCRF()->arg_begin() + (FI - 1));
+            const_cast<Argument *>(
+            FuncInfo->getRaisedFunction()->arg_begin() + (FI - 1));
         EVT Evt = EVT::getEVT(V->getType());
         SDValue Sdv = DAG->getFrameIndex(FI, Evt, false);
         FuncInfo->setRealValue(Sdv.getNode(), V);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
       } else if (FuncInfo->isReturnIndex(FI)) {
-        EVT Evt = EVT::getEVT(FuncInfo->getCRF()->getReturnType());
+        EVT Evt = EVT::getEVT(FuncInfo->getRaisedFunction()->getReturnType());
         SDValue Sdv = DAG->getFrameIndex(0, Evt, false);
         VCtv.push_back(Sdv);
         VCtt.push_back(Evt);
@@ -76,7 +77,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
       VCtt.push_back(Evt);
     } else if (MO.isSymbol()) {
       GlobalVariable *V =
-          FuncInfo->MR->getModule()->getNamedGlobal(MO.getSymbolName());
+          FuncInfo->getModule()->getNamedGlobal(MO.getSymbolName());
       EVT Evt = EVT::getEVT(V->getValueType(), true);
       SDValue Sdv = DAG->getExternalSymbol(MO.getSymbolName(), Evt);
       FuncInfo->setRealValue(Sdv.getNode(), V);
@@ -84,7 +85,7 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
       VCtt.push_back(Evt);
     } else if (MO.isMetadata()) {
       const MDNode *MD = MO.getMetadata();
-      Type *Ty = Type::getInt64Ty(FuncInfo->getCRF()->getContext());
+      Type *Ty = Type::getInt64Ty(FuncInfo->getRaisedFunction()->getContext());
       EVT Evt = EVT::getEVT(Ty);
       SDValue Sdv = DAG->getMDNode(MD);
       VCtv.push_back(Sdv);
@@ -104,69 +105,6 @@ SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
 
   SDLoc Sdl(nullptr, 0);
   return DAG->getMachineNode(MI.getOpcode(), Sdl, DAG->getVTList(VTs), Ops);
-}
-
-/// Analyzes CPSR register information of MI to collect conditional
-/// code properties.
-NodePropertyInfo *ARMMachineInstructionRaiser::CreateNPI(const MachineInstr &MI) {
-  NodePropertyInfo *NodeInfo = new NodePropertyInfo();
-  // Initialize the NodePropertyInfo properties.
-  NodeInfo->HasCPSR = false;
-  NodeInfo->Special = false;
-  NodeInfo->UpdateCPSR = false;
-
-  // ARM::CPSR register use index in MachineInstr.
-  int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
-  // Number of operands for MachineInstr.
-  int NumOps = MI.getNumOperands();
-
-  // TODO: Now the predicate operand not stripped, so the two-address operands
-  // more than two.
-  // Set the MI is two-address. The default is three-address.
-  if (NumOps < 4)
-    NodeInfo->IsTwoAddress = true;
-
-  // If the MachineInstr has ARM::CPSR register, update the NodePropertyInfo
-  // properties.
-  if (Idx != -1 && !MI.getOperand(Idx).isImplicit()) {
-    // MI with ARM::CPSR register.
-    if (Idx != NumOps - 1) {
-      if (MI.getOperand(Idx + 1).isReg() &&
-          MI.getOperand(Idx + 1).getReg() == ARM::CPSR) {
-        // Pattern matching: addseq r0, r0, 0
-        assert(MI.getOperand(Idx - 1).isImm() &&
-               "Attempt to get non-imm operand!");
-
-        NodeInfo->Cond = MI.getOperand(Idx - 1).getImm();
-        NodeInfo->Special = true;
-      } else {
-        // Pattern matching: addeq r0, r0, 0
-        for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
-          if (MI.getOperand(Idx - OpIdx).isImm()) {
-            NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
-            break;
-          }
-        }
-      }
-    } else {
-      if (MI.getOperand(Idx - 1).isReg() &&
-          MI.getOperand(Idx - 1).getReg() == ARM::CPSR) {
-        for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
-          if (MI.getOperand(Idx - OpIdx).isImm()) {
-            NodeInfo->Special = true;
-            NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
-            break;
-          }
-        }
-      }
-    }
-    // Pattern matching: adds r0, r0, 0
-    if (NodeInfo->Cond == ARMCC::AL)
-      NodeInfo->UpdateCPSR = true;
-
-    NodeInfo->HasCPSR = true;
-  }
-  return NodeInfo;
 }
 
 #undef DEBUG_TYPE
