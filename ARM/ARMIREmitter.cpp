@@ -107,8 +107,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
     Type *OperandTy = getDefaultType();
 
     if (NPI->HasCPSR) {
@@ -121,6 +121,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *InstADC = IRB.CreateAdd(Result, CZext);
         FuncInfo->setRealValue(Node, InstADC);
         FuncInfo->setArgValue(Node, InstADC);
+        FuncInfo->recordDefinition(MI, 0, InstADC);
 
         // Update CPSR.
         // TODO:
@@ -148,6 +149,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
+        FuncInfo->recordDefinition(MI, 0, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -161,6 +163,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->setRealValue(Node, InstADC);
       FuncInfo->setArgValue(Node, InstADC);
+      FuncInfo->recordDefinition(MI, 0, InstADC);
     }
   } break;
   /* ADD */
@@ -544,7 +547,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
       NPI->Node = Node;
-      Value *FuncVal = FuncInfo->getIRValue(Node->getOperand(0));
+      Value *FuncVal = FuncInfo->getOperand(MI, 0);
       unsigned NumDests = Node->getNumOperands();
       IRB.CreateIndirectBr(FuncVal, NumDests);
     } else {
@@ -577,7 +580,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
       NPI->Node = Node;
-      Value *FuncVal = FuncInfo->getIRValue(Node->getOperand(0));
+      Value *FuncVal = FuncInfo->getOperand(MI, 0);
       unsigned NumDests = Node->getNumOperands();
       IRB.CreateIndirectBr(FuncVal, NumDests);
     } else {
@@ -668,7 +671,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
-    Value *FuncVal = FuncInfo->getIRValue(Node->getOperand(0));
+    Value *FuncVal = FuncInfo->getOperand(MI, 0);
     unsigned NumDests = Node->getNumOperands();
     IRB.CreateIndirectBr(FuncVal, NumDests);
   } break;
@@ -798,8 +801,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
     if (NPI->HasCPSR) {
       unsigned CondValue = NPI->Cond;
       HANDLE_EMIT_CONDCODE_COMMON(Add)
@@ -810,6 +813,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateAdd(S0, S1);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
+      FuncInfo->recordDefinition(MI, 0, Inst);
       emitCPSR(FuncInfo, S0, S1, BB, 0);
     }
   } break;
@@ -874,7 +878,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
-    Value *CondVal = FuncInfo->getIRValue(Node->getOperand(0));
+    Value *CondVal = FuncInfo->getOperand(MI, 0);
     // 1 1 1 1
     // N set 1 0 0 0   8
     // Z set 0 1 0 0   4
@@ -1084,8 +1088,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, 32, true);
 
@@ -1097,6 +1101,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
+        FuncInfo->recordDefinition(MI, 0, Inst);
 
         emitSpecialCPSR(FuncInfo, Inst, BB, 0);
       } else {
@@ -1116,6 +1121,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
+        FuncInfo->recordDefinition(MI, 0, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -1126,6 +1132,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateOr(InstLShr, InstShl);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* RRX */
@@ -1140,7 +1147,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
     Type *Ty = getDefaultType();
     Value *Val1 = ConstantInt::get(Ty, 1, true);
     Value *Val2 = ConstantInt::get(Ty, 31, true);
@@ -1154,6 +1161,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
+        FuncInfo->recordDefinition(MI, 0, Inst);
 
         /**************************************/
         emitSpecialCPSR(FuncInfo, Inst, BB, 0);
@@ -1182,6 +1190,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
+        FuncInfo->recordDefinition(MI, 0, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -1194,6 +1203,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* RSB */
@@ -1228,8 +1238,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
 
     if (NPI->HasCPSR) {
       unsigned CondValue = NPI->Cond;
@@ -1238,6 +1248,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateSub(S0, S1);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
+        FuncInfo->recordDefinition(MI, 0, Inst);
 
         Value *InstNot = IRB.CreateNot(S1);
         emitCPSR(FuncInfo, InstNot, S0, BB, 1);
@@ -1248,6 +1259,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateSub(S0, S1);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* RSC */
@@ -1281,8 +1293,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
 
     Value *CFlag =
         callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
@@ -1292,6 +1304,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Inst = IRB.CreateSub(S1, Inst);
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
+    FuncInfo->recordDefinition(MI, 0, Inst);
   } break;
   /* CLZ */
   case ARM::CLZ:
@@ -1305,7 +1318,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
     Function *CTLZ = Intrinsic::getDeclaration(BB->getParent()->getParent(),
                                                Intrinsic::ctlz, S0->getType());
     Type *I1ype = llvm::IntegerType::getInt1Ty(Ctx);
@@ -1319,6 +1332,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *Inst = IRB.CreateCall(CTLZ, Args);
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
+    FuncInfo->recordDefinition(MI, 0, Inst);
   } break;
   /* SBC */
   case ARM::SBCrr:
@@ -1333,8 +1347,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rn.getNode(), Node);
     NPI->Node = Node;
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S2 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S1 = FuncInfo->getOperand(MI, 0);
+    Value *S2 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
 
     if (NPI->HasCPSR) {
@@ -1368,6 +1382,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
+        FuncInfo->recordDefinition(MI, 0, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -1404,8 +1419,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
 
     if (NPI->HasCPSR) {
       // Create new BB for EQ instruction execute.
@@ -1422,9 +1437,13 @@ void ARMMachineInstructionRaiser::emitInstr(
       emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
+
+      FuncInfo->recordDefinition(MI, 0, Inst);
     } else {
       Value *Inst = IRB.CreateXor(S0, S1);
       emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* TST */
@@ -1450,8 +1469,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
 
     if (NPI->HasCPSR) {
       // Create new BB for EQ instruction execute.
@@ -1469,9 +1488,13 @@ void ARMMachineInstructionRaiser::emitInstr(
       emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
+
+      FuncInfo->recordDefinition(MI, 0, Inst);
     } else {
       Value *Inst = IRB.CreateAnd(S0, S1);
       emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* BIC */
@@ -1509,8 +1532,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, -1, true);
 
@@ -1521,6 +1544,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
+        FuncInfo->recordDefinition(MI, 0, Inst);
 
         emitSpecialCPSR(FuncInfo, Inst, BB, 0);
         // Update C flag.
@@ -1542,6 +1566,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
+        FuncInfo->recordDefinition(MI, 0, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -1552,6 +1577,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Inst = IRB.CreateAnd(S0, InstXor);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
+      FuncInfo->recordDefinition(MI, 0, Inst);
     }
   } break;
   /* MLA */
@@ -1568,15 +1594,16 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
-    Value *S2 = FuncInfo->getIRValue(Node->getOperand(2));
+    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S2 = FuncInfo->getOperand(MI, 2);
 
     Value *InstMul = IRB.CreateMul(S0, S1);
     Value *Inst = IRB.CreateAdd(InstMul, S2);
 
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
+    FuncInfo->recordDefinition(MI, 0, Inst);
   } break;
   /* UXTB */
   case ARM::UXTB: {
@@ -1592,8 +1619,8 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
-    Value *RotationVal = FuncInfo->getIRValue(Node->getOperand(2));
+    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *RotationVal = FuncInfo->getOperand(MI, 2);
     Value *RorVal = ConstantInt::get(getDefaultType(), 8, true);
     Value *AddVal = ConstantInt::get(getDefaultType(), 0, true);
     Value *AndVal = ConstantInt::get(getDefaultType(), 0xff, true);
@@ -1602,6 +1629,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *InstAdd = IRB.CreateAdd(InstLshr, AddVal);
     Value *InstAnd = IRB.CreateAnd(InstAdd, AndVal);
     FuncInfo->setRealValue(Node, InstAnd);
+    FuncInfo->recordDefinition(MI, 0, InstAnd);
   } break;
   case ARM::MCR:
   case ARM::MCRR:
@@ -1627,7 +1655,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                          getMDOperand(N))
                .getNode();
     NPI->Node = Node;
-    Value *RnVal = FuncInfo->getIRValue(Node->getOperand(0));
+    Value *RnVal = FuncInfo->getOperand(MI, 0);
     // Reserved || N_Flag << 31 || Z_Flag << 30 || C_Flag << 29 || V_Flag << 28
     PointerType *PtrTy = PointerType::getInt32PtrTy(Ctx);
     Type *Ty = Type::getInt32Ty(Ctx);
@@ -1667,6 +1695,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->setRealValue(Node, RnStore);
     FuncInfo->setArgValue(Node, RnStore);
+    FuncInfo->recordDefinition(MI, 0, RnStore);
   } break;
   /* ABS */
   case ARM::ABS:

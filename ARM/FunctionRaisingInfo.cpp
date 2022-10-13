@@ -106,9 +106,9 @@ void FunctionRaisingInfo::setRealValue(SDNode *Node, Value *V) {
 
 /// Gets the related IR Value of given Register.
 Value *FunctionRaisingInfo::getRegisterValue(Register Reg) {
-  assert(RegVMap.count(Reg) != 0 &&
+  assert(ArgValMap.count(Reg) != 0 &&
          "Cannot find value for the corresponding register!");
-  return RegVMap[Reg];
+  return ArgValMap[Reg]; // RegVMap[Reg];
 }
 
 /// Set the related IR Value to Register.
@@ -130,7 +130,19 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
   const MachineOperand &MO = MI.getOperand(Num);
   Value *Operand = nullptr;
   if (MO.isReg() && !MO.isDebug()) {
-    Operand = getRegisterValue(MO.getReg());
+    auto Reg = MO.getReg();
+    if (ArgValMap.count(Reg) == 0) {
+      // first use register
+      if (Reg > ARM::NUM_TARGET_REGS) {
+        // Virtual register used in the splitted MI.
+        Operand = ConstantInt::get(DefaultType, 0);
+      } else {
+        assert(false &&
+               "Cannot find value for the corresponding register!");
+      }
+    } else {
+      Operand = ArgValMap[Reg];
+    }
   } else if (MO.isImm()) {
     Operand = const_cast<ConstantInt *>(MO.getCImm()); //ConstantInt::get(getDefaultType(), MO.getImm());
   } else if (MO.isFI()) {
@@ -251,4 +263,22 @@ void FunctionRaisingInfo::recordDefinition(SDNode *OldOpNode, SDNode *NewNode) {
     setSDValueByRegister(ARM::R0, SDValue(NewNode, 0));
     NodeRegMap[NewNode] = ARM::R0;
   }
+}
+
+void FunctionRaisingInfo::recordDefinition(const MachineInstr &MI,
+                                           unsigned OpNum, Value *Val) {
+  assert(Val != nullptr &&
+         "The new Value ptr is null when record define!");
+  auto *Op = &MI.getOperand(OpNum);
+  if (Op->isReg()) {
+    recordDefinition(Op->getReg(), Val);
+  }
+
+  if (Op->isFI() && isReturnIndex(Op->getIndex())) {
+    recordDefinition(ARM::R0, Val);
+  }
+}
+
+void FunctionRaisingInfo::recordDefinition(Register Reg, Value *Val) {
+  ArgValMap[Reg] = Val;
 }

@@ -215,6 +215,7 @@ void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MInst) {
   } else {
     uint64_t Offset = getMCInstIndex(MInst);
     const RelocationRef *Reloc = MR->getTextRelocAtOffset(Offset, 4);
+    assert(Reloc && "Failed to get relocation ref");
     auto ImmValOrErr = (*Reloc->getSymbol()).getValue();
     assert(ImmValOrErr && "Failed to get immediate value");
     MInst.getOperand(0).setImm(*ImmValOrErr);

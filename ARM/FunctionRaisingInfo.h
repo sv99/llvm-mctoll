@@ -131,6 +131,9 @@ public:
   /// Record the new defined Node, it uses to map the register number to Node.
   /// In DAG emitter, emitter get a value of use base on this defined Node.
   void recordDefinition(SDNode *OldOpNode, SDNode *NewNode);
+  void recordDefinition(const MachineInstr &MI, unsigned OpNum,
+                        Value *Val);
+  void recordDefinition(Register Reg, Value *Val);
 
   SDValue getSDValueByRegister(unsigned Reg);
   SDValue getSDValueByRegister(SDValue Val);
