@@ -20,7 +20,7 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-void ARMMachineInstructionRaiser::initEntryBasicBlock(FunctionRaisingInfo *FuncInfo) {
+void ARMMachineInstructionRaiser::initEntryBasicBlock() {
   BasicBlock *EntryBlock = &RaisedFunction->getEntryBlock();
   for (unsigned Idx = 0; Idx < 4; Idx++) {
     Align MALG(32);
@@ -38,14 +38,14 @@ bool ARMMachineInstructionRaiser::doSelection() {
   SelectionDAG *CurDAG = new SelectionDAG(*MR->getTargetMachine(), CodeGenOpt::None);
   auto ORE = make_unique<OptimizationRemarkEmitter>(RaisedFunction);
   CurDAG->init(MF, *ORE.get(), nullptr, nullptr, nullptr, nullptr, nullptr);
-  FunctionRaisingInfo *FuncInfo = new FunctionRaisingInfo();
+  FuncInfo = new FunctionRaisingInfo();
   FuncInfo->set(*TargetMR, *getRaisedFunction(), MF, *CurDAG);
 
-  initEntryBasicBlock(FuncInfo);
+  initEntryBasicBlock();
   for (MachineBasicBlock &Block : MF) {
     // MBB = &Block;
     FuncInfo->getOrCreateBasicBlock(&Block);
-    selectBasicBlock(FuncInfo, &Block);
+    selectBasicBlock(&Block);
   }
 
   // Add an additional exit BasicBlock, all of original return BasicBlocks
@@ -184,14 +184,13 @@ LLVM_DUMP_METHOD void ARMMachineInstructionRaiser::dumpDAG(SelectionDAG *CurDAG)
 }
 #endif
 
-void ARMMachineInstructionRaiser::selectBasicBlock(
-    FunctionRaisingInfo *FuncInfo, MachineBasicBlock *MBB) {
+void ARMMachineInstructionRaiser::selectBasicBlock(MachineBasicBlock *MBB) {
 
   auto *BB = FuncInfo->getOrCreateBasicBlock(MBB);
   auto *CurDAG = &FuncInfo->getCurDAG();
 
   for (MachineInstr &MI : MBB->instrs()) {
-    emitInstr(FuncInfo, BB, MI);
+    emitInstr(BB, MI);
   }
 
   LLVM_DEBUG(dbgs() << "DUG after start.\n");

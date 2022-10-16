@@ -23,8 +23,7 @@ using namespace llvm::mctoll;
 #define DEBUG_TYPE "mctoll"
 
 /// Collects the information of each MI to create SDNodes.
-SDNode *ARMMachineInstructionRaiser::visit(FunctionRaisingInfo *FuncInfo,
-                                           const MachineInstr &MI) {
+SDNode *ARMMachineInstructionRaiser::visit(const MachineInstr &MI) {
   std::vector<SDValue> VCtv;
   std::vector<EVT> VCtt;
   auto *DAG = &FuncInfo->getCurDAG();

@@ -40,14 +40,15 @@ EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
   BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());             \
   BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());           \
                                                                                \
-  emitCondCode(FuncInfo, CondValue, BB, IfBB, ElseBB);                         \
+  emitCondCode(CondValue, BB, IfBB, ElseBB);                         \
                                                                                \
   Value *Inst = BinaryOperator::Create##OPC(S0, S1);                           \
   IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));                  \
-  PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,          \
+  PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,          \
                                       dyn_cast<Instruction>(Inst));            \
   FuncInfo->setRealValue(Node, Phi);                                           \
-  FuncInfo->setArgValue(Node, Phi);
+  FuncInfo->setArgValue(Node, Phi);                                            \
+  FuncInfo->recordDefinition(MI, Phi);
 
 #define HANDLE_EMIT_CONDCODE(OPC)                                              \
   HANDLE_EMIT_CONDCODE_COMMON(OPC)                                             \
@@ -57,13 +58,11 @@ EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
 
 /// Emit Instruction and add to BasicBlock.
 void ARMMachineInstructionRaiser::emitInstr(
-    FunctionRaisingInfo *FuncInfo, BasicBlock *BB,
-    const MachineInstr &MI) {
+    BasicBlock *BB, const MachineInstr &MI) {
 
   IRBuilder<> IRB(BB);
-
   NodePropertyInfo *NPI = FuncInfo->initNPI(MI);
-  auto *N = visit(FuncInfo, MI);
+  auto *N = visit(MI);
   auto *CurDAG = &FuncInfo->getCurDAG();
   SDLoc Dl(N);
   SDNode *Node = nullptr;
@@ -94,6 +93,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                            getMDOperand(N))
                  .getNode();
     } else {
+      // ADC{S}<c> <Rd>,<Rn>,<Rm>
       // ADC{S}<c> <Rd>,<Rn>,#<const>
       SDValue Op2 = N->getOperand(2);
       if (RegisterSDNode::classof(Op2.getNode()))
@@ -107,64 +107,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
-    Type *OperandTy = getDefaultType();
-
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
-        // Create add emit.
-        Value *CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-        Value *Result = IRB.CreateAdd(S0, S1);
-        Value *CZext = IRB.CreateZExt(CFlag, OperandTy);
-        Value *InstADC = IRB.CreateAdd(Result, CZext);
-        FuncInfo->setRealValue(Node, InstADC);
-        FuncInfo->setArgValue(Node, InstADC);
-        FuncInfo->recordDefinition(MI, 0, InstADC);
-
-        // Update CPSR.
-        // TODO:
-        // Should consider how to do this.
-        if (1)
-          emitCPSR(FuncInfo, S0, S1, BB, 1);
-        else
-          emitCPSR(FuncInfo, S0, S1, BB, 0);
-      } else {
-        // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
-
-        // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
-
-        Value *CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-        IRB.SetInsertPoint(IfBB);
-        Value *InstAdd = IRB.CreateAdd(S0, S1);
-        Value *CZext = IRB.CreateZExtOrTrunc(CFlag, OperandTy);
-        Value *Inst = IRB.CreateAdd(InstAdd, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
-        FuncInfo->setRealValue(Node, Phi);
-        FuncInfo->setArgValue(Node, Phi);
-        FuncInfo->recordDefinition(MI, 0, Phi);
-
-        IRB.CreateBr(ElseBB);
-        IRB.SetInsertPoint(ElseBB);
-      }
-    } else {
-      Value *CFlag =
-          callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-      Value *Inst = IRB.CreateAdd(S0, S1);
-      Value *CTrunc = IRB.CreateZExtOrTrunc(CFlag, getDefaultType());
-      Value *InstADC = IRB.CreateAdd(Inst, CTrunc);
-
-      FuncInfo->setRealValue(Node, InstADC);
-      FuncInfo->setArgValue(Node, InstADC);
-      FuncInfo->recordDefinition(MI, 0, InstADC);
-    }
+    emitADC(BB, NPI);
   } break;
   /* ADD */
   case ARM::ADDri:
@@ -198,7 +141,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->recordDefinition(Rd.getNode(), Node);
       NPI->Node = Node;
-      emitLoad(FuncInfo, BB, MI);
+      emitLoad(BB, MI);
     } else {
       if (NPI->IsTwoAddress) {
         if (RegisterSDNode::classof(N->getOperand(1).getNode()))
@@ -223,7 +166,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->recordDefinition(Rd.getNode(), Node);
       NPI->Node = Node;
-      emitBinaryAdd(FuncInfo, BB, MI);
+      emitBinaryAdd(BB, MI);
     }
   } break;
   /* SUB */
@@ -264,7 +207,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinarySub(FuncInfo, BB, MI);
+    emitBinarySub(BB, MI);
   } break;
   /* MOV */
   case ARM::MOVi16:
@@ -292,7 +235,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryAdd(FuncInfo, BB, MI);
+    emitBinaryAdd(BB, MI);
   } break;
   /* STR */
   case ARM::STRi12:
@@ -324,7 +267,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
-    emitStore(FuncInfo, BB, MI);
+    emitStore(BB, MI);
   } break;
   case ARM::STRH:
   case ARM::STRH_PRE:
@@ -354,7 +297,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
 
     NPI->Node = Node;
-    emitStore(FuncInfo, BB, MI);
+    emitStore(BB, MI);
   } break;
   case ARM::STRBi12:
   case ARM::STRBrs:
@@ -387,7 +330,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
 
     NPI->Node = Node;
-    emitStore(FuncInfo, BB, MI);
+    emitStore(BB, MI);
   } break;
   /* LDR */
   case ARM::LDRi12:
@@ -411,7 +354,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitLoad(FuncInfo, BB, MI);
+    emitLoad(BB, MI);
   } break;
   case ARM::LDRH:
   case ARM::LDRSH:
@@ -433,7 +376,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitLoad(FuncInfo, BB, MI);
+    emitLoad(BB, MI);
   } break;
   case ARM::LDRBi12:
   case ARM::LDRBrs:
@@ -459,7 +402,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitLoad(FuncInfo, BB, MI);
+    emitLoad(BB, MI);
   } break;
   /* Branch */
   case ARM::Bcc:
@@ -488,7 +431,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       MachineBasicBlock *NextMBB = &*std::next(MBB->getIterator());
       BasicBlock *NextBB = FuncInfo->getOrCreateBasicBlock(NextMBB);
 
-      emitCondCode(FuncInfo, CondVal, BB, IfTrueP, NextBB);
+      emitCondCode(CondVal, BB, IfTrueP, NextBB);
     } else {
       Node = CurDAG
                  ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), Iftrue,
@@ -508,7 +451,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
         IRB.CreateBr(BrDest);
       } else {
-        emitBRD(FuncInfo, BB, MI);
+        emitBRD(BB, MI);
       }
     }
   } break;
@@ -529,7 +472,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
       IRB.CreateBr(BrDest);
     } else {
-      emitBRD(FuncInfo, BB, MI);
+      emitBRD(BB, MI);
     }
   } break;
   case ARM::BL:
@@ -559,7 +502,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
       NPI->Node = Node;
-      emitBRD(FuncInfo, BB, MI);
+      emitBRD(BB, MI);
     }
   } break;
   case ARM::BLX:
@@ -592,7 +535,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
       NPI->Node = Node;
-      emitBRD(FuncInfo, BB, MI);
+      emitBRD(BB, MI);
     }
   } break;
   case ARM::BR_JTr: {
@@ -702,6 +645,9 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
+    // set flags by result <Op1> - <Op2>
+    // SBBS without store result
+
   } break;
   /* AND */
   case ARM::ANDri:
@@ -740,7 +686,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryAnd(FuncInfo, BB, MI);
+    emitBinaryAnd(BB, MI);
     // TODO:
     // AND{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // AND{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -779,7 +725,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryAShr(FuncInfo, BB, MI);
+    emitBinaryAShr(BB, MI);
   } break;
   /* CMN */
   case ARM::CMNri:
@@ -806,15 +752,15 @@ void ARMMachineInstructionRaiser::emitInstr(
     if (NPI->HasCPSR) {
       unsigned CondValue = NPI->Cond;
       HANDLE_EMIT_CONDCODE_COMMON(Add)
-      emitCPSR(FuncInfo, S0, S1, IfBB, 0);
+      emitCPSR(S0, S1, IfBB, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
     } else {
       Value *Inst = IRB.CreateAdd(S0, S1);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
-      FuncInfo->recordDefinition(MI, 0, Inst);
-      emitCPSR(FuncInfo, S0, S1, BB, 0);
+      FuncInfo->recordDefinition(MI, Inst);
+      emitCPSR(S0, S1, BB, 0);
     }
   } break;
   /* EOR */
@@ -853,7 +799,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryXor(FuncInfo, BB, MI);
+    emitBinaryXor(BB, MI);
     // TODO:
     // EOR{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // EOR{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -929,7 +875,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryMul(FuncInfo, BB, MI);
+    emitBinaryMul(BB, MI);
   } break;
   /* MVN */
   case ARM::MVNi:
@@ -986,7 +932,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryShl(FuncInfo, BB, MI);
+    emitBinaryShl(BB, MI);
   } break;
   /* LSR */
   case ARM::LSRi:
@@ -1019,7 +965,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryLShr(FuncInfo, BB, MI);
+    emitBinaryLShr(BB, MI);
   } break;
   /* ORR */
   case ARM::ORRri:
@@ -1056,7 +1002,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    emitBinaryOr(FuncInfo, BB, MI);
+    emitBinaryOr(BB, MI);
   } break;
   /* ROR */
   case ARM::RORi:
@@ -1101,9 +1047,9 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
-        FuncInfo->recordDefinition(MI, 0, Inst);
+        FuncInfo->recordDefinition(MI, Inst);
 
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+        emitSpecialCPSR(Inst, BB, 0);
       } else {
         // Create new BB for EQ instruction execute.
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -1111,17 +1057,17 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+        emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(Val, S1);
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
-        FuncInfo->recordDefinition(MI, 0, Phi);
+        FuncInfo->recordDefinition(MI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -1132,7 +1078,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateOr(InstLShr, InstShl);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* RRX */
@@ -1161,10 +1107,10 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
-        FuncInfo->recordDefinition(MI, 0, Inst);
+        FuncInfo->recordDefinition(MI, Inst);
 
         /**************************************/
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+        emitSpecialCPSR(Inst, BB, 0);
         // Update C flag.
         // c flag = s0[0]
         CFlag = IRB.CreateAnd(S0, Val1);
@@ -1176,7 +1122,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+        emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag = nullptr;
@@ -1186,11 +1132,11 @@ void ARMMachineInstructionRaiser::emitInstr(
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
-        FuncInfo->recordDefinition(MI, 0, Phi);
+        FuncInfo->recordDefinition(MI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -1203,7 +1149,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* RSB */
@@ -1248,10 +1194,10 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *Inst = IRB.CreateSub(S0, S1);
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
-        FuncInfo->recordDefinition(MI, 0, Inst);
+        FuncInfo->recordDefinition(MI, Inst);
 
         Value *InstNot = IRB.CreateNot(S1);
-        emitCPSR(FuncInfo, InstNot, S0, BB, 1);
+        emitCPSR(InstNot, S0, BB, 1);
       } else {
         HANDLE_EMIT_CONDCODE(Sub)
       }
@@ -1259,7 +1205,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *Inst = IRB.CreateSub(S0, S1);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* RSC */
@@ -1304,7 +1250,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Inst = IRB.CreateSub(S1, Inst);
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
-    FuncInfo->recordDefinition(MI, 0, Inst);
+    FuncInfo->recordDefinition(MI, Inst);
   } break;
   /* CLZ */
   case ARM::CLZ:
@@ -1332,7 +1278,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *Inst = IRB.CreateCall(CTLZ, Args);
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
-    FuncInfo->recordDefinition(MI, 0, Inst);
+    FuncInfo->recordDefinition(MI, Inst);
   } break;
   /* SBC */
   case ARM::SBCrr:
@@ -1362,14 +1308,14 @@ void ARMMachineInstructionRaiser::emitInstr(
         FuncInfo->setRealValue(Node, InstSBC);
         Value *InstNot = IRB.CreateNot(S2);
         if (1)
-          emitCPSR(FuncInfo, S1, InstNot, BB, 0);
+          emitCPSR(S1, InstNot, BB, 0);
         else
-          emitCPSR(FuncInfo, S1, InstNot, BB, 1);
+          emitCPSR(S1, InstNot, BB, 1);
       } else {
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+        emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
 
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(S1, S2);
@@ -1378,11 +1324,11 @@ void ARMMachineInstructionRaiser::emitInstr(
             callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *Inst = IRB.CreateAdd(InstSub, CZext);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
-        FuncInfo->recordDefinition(MI, 0, Phi);
+        FuncInfo->recordDefinition(MI, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -1431,19 +1377,19 @@ void ARMMachineInstructionRaiser::emitInstr(
       // TODO:
       // This instruction not change def, consider phi later.
 
-      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+      emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateXor(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
+      emitSpecialCPSR(Inst, IfBB, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
 
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     } else {
       Value *Inst = IRB.CreateXor(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+      emitSpecialCPSR(Inst, BB, 0);
 
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* TST */
@@ -1482,19 +1428,19 @@ void ARMMachineInstructionRaiser::emitInstr(
       // Not change def. Consider how to use PHI.
       // PHINode *Phi = createAndEmitPHINode(Node, BB, ElseBB);
 
-      emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+      emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateAnd(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, IfBB, 0);
+      emitSpecialCPSR(Inst, IfBB, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
 
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     } else {
       Value *Inst = IRB.CreateAnd(S0, S1);
-      emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+      emitSpecialCPSR(Inst, BB, 0);
 
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* BIC */
@@ -1544,9 +1490,9 @@ void ARMMachineInstructionRaiser::emitInstr(
 
         FuncInfo->setRealValue(Node, Inst);
         FuncInfo->setArgValue(Node, Inst);
-        FuncInfo->recordDefinition(MI, 0, Inst);
+        FuncInfo->recordDefinition(MI, Inst);
 
-        emitSpecialCPSR(FuncInfo, Inst, BB, 0);
+        emitSpecialCPSR(Inst, BB, 0);
         // Update C flag.
         // C flag not change.
 
@@ -1558,15 +1504,15 @@ void ARMMachineInstructionRaiser::emitInstr(
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Emit the condition code.
-        emitCondCode(FuncInfo, NPI->Cond, BB, IfBB, ElseBB);
+        emitCondCode(NPI->Cond, BB, IfBB, ElseBB);
         IRB.SetInsertPoint(IfBB);
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
-        PHINode *Phi = createAndEmitPHINode(FuncInfo, MI, BB, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
         FuncInfo->setRealValue(Node, Phi);
         FuncInfo->setArgValue(Node, Phi);
-        FuncInfo->recordDefinition(MI, 0, Phi);
+        FuncInfo->recordDefinition(MI, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -1577,7 +1523,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       Inst = IRB.CreateAnd(S0, InstXor);
       FuncInfo->setRealValue(Node, Inst);
       FuncInfo->setArgValue(Node, Inst);
-      FuncInfo->recordDefinition(MI, 0, Inst);
+      FuncInfo->recordDefinition(MI, Inst);
     }
   } break;
   /* MLA */
@@ -1603,7 +1549,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->setRealValue(Node, Inst);
     FuncInfo->setArgValue(Node, Inst);
-    FuncInfo->recordDefinition(MI, 0, Inst);
+    FuncInfo->recordDefinition(MI, Inst);
   } break;
   /* UXTB */
   case ARM::UXTB: {
@@ -1629,7 +1575,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *InstAdd = IRB.CreateAdd(InstLshr, AddVal);
     Value *InstAnd = IRB.CreateAnd(InstAdd, AndVal);
     FuncInfo->setRealValue(Node, InstAnd);
-    FuncInfo->recordDefinition(MI, 0, InstAnd);
+    FuncInfo->recordDefinition(MI, InstAnd);
   } break;
   case ARM::MCR:
   case ARM::MCRR:
@@ -1695,7 +1641,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->setRealValue(Node, RnStore);
     FuncInfo->setArgValue(Node, RnStore);
-    FuncInfo->recordDefinition(MI, 0, RnStore);
+    FuncInfo->recordDefinition(MI, RnStore);
   } break;
   /* ABS */
   case ARM::ABS:
@@ -1753,5 +1699,6 @@ void ARMMachineInstructionRaiser::emitInstr(
     outs() << "WARNING: ARM::VTRN Not yet implemented!\n";
   } break;
     // TODO: Need to add other pattern matching here.
+    outs() << "!!WARNING!!: Unimplemented instruction!\n";
   }
 }

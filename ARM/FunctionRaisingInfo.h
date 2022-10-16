@@ -56,6 +56,7 @@ enum NodeType {
 /// This structure is to extend SDNode properties, some additional SDNode
 /// properties which are used by llvm-mctoll will be kept at here.
 typedef struct {
+  const MachineInstr *MI;
   bool HasCPSR;
   bool Special;
   bool UpdateCPSR;
@@ -131,8 +132,7 @@ public:
   /// Record the new defined Node, it uses to map the register number to Node.
   /// In DAG emitter, emitter get a value of use base on this defined Node.
   void recordDefinition(SDNode *OldOpNode, SDNode *NewNode);
-  void recordDefinition(const MachineInstr &MI, unsigned OpNum,
-                        Value *Val);
+  void recordDefinition(const MachineInstr &MI, Value *Val);
   void recordDefinition(Register Reg, Value *Val);
 
   SDValue getSDValueByRegister(unsigned Reg);
@@ -149,6 +149,7 @@ public:
   void setRegisterValue(Register Reg, Value *V);
   /// Get IR value for the MI operand.
   Value *getOperand(const MachineInstr &MI, unsigned Num);
+  Value *getOperand(NodePropertyInfo *NPI, unsigned Num);
   /// Get IR value for the SDValue operand.
   Value *getIRValue(SDValue Val);
 

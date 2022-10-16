@@ -144,8 +144,8 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
       Operand = ArgValMap[Reg];
     }
   } else if (MO.isImm()) {
-    Operand = const_cast<ConstantInt *>(MO.getCImm()); //ConstantInt::get(getDefaultType(), MO.getImm());
-  } else if (MO.isFI()) {
+    Operand = ConstantInt::get(getDefaultType(), MO.getImm());
+   } else if (MO.isFI()) {
     // Frame index
     int FI = MO.getIndex();
     if (isStackIndex(FI)) {
@@ -171,15 +171,52 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
   return Operand;
 }
 
-NodePropertyInfo * FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
+Value *FunctionRaisingInfo::getOperand(NodePropertyInfo *NPI, unsigned Num) {
+  if ((!NPI->IsTwoAddress) && (Num < 2)) {
+    Num++;
+  }
+  const MachineOperand &MO = NPI->MI->getOperand(Num);
+  Value *Operand = nullptr;
+  if (MO.isReg() && !MO.isDebug()) {
+    auto Reg = MO.getReg();
+    assert(ArgValMap.count(Reg) != 0 &&
+           "Cannot find value for the corresponding register!");
+    Operand = ArgValMap[Reg];
+  } else if (MO.isImm()) {
+    Operand = ConstantInt::get(getDefaultType(), MO.getImm());
+  } else if (MO.isFI()) {
+    // Frame index
+    int FI = MO.getIndex();
+    const MachineFrameInfo &MFI = NPI->MI->getMF()->getFrameInfo();
+    if (isStackIndex(FI)) {
+      Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
+    } else if (isArgumentIndex(FI)) {
+      Operand = const_cast<Argument *>(getRaisedFunction()->arg_begin() + (FI - 1));
+    } else if (isReturnIndex(FI)) {
+      Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(0));
+    } else {
+      // Do nothing for now.
+    }
+  } else if (MO.isJTI()) {
+    // Jump table index
+    Operand = ConstantInt::get(getDefaultType(), MO.getIndex());
+  } else if (MO.isSymbol()) {
+    Operand = MR->getModule()->getNamedGlobal(MO.getSymbolName());
+  } else {
+    dbgs() << "Warning: visit. An unmatch type! = "
+           << (unsigned)(MO.getType()) << "\n";
+  }
+  return Operand;
+}
+
+NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
   NodePropertyInfo *NodeInfo = new NodePropertyInfo();
   // Initialize the NodePropertyInfo properties.
+  NodeInfo->MI = &MI;
   NodeInfo->HasCPSR = false;
   NodeInfo->Special = false;
   NodeInfo->UpdateCPSR = false;
 
-  // ARM::CPSR register use index in MachineInstr.
-  int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
   // Number of operands for MachineInstr.
   int NumOps = MI.getNumOperands();
 
@@ -189,6 +226,8 @@ NodePropertyInfo * FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
   if (NumOps < 4)
     NodeInfo->IsTwoAddress = true;
 
+  // ARM::CPSR register use index in MachineInstr.
+  int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
   // If the MachineInstr has ARM::CPSR register, update the NodePropertyInfo
   // properties.
   if (Idx != -1 && !MI.getOperand(Idx).isImplicit()) {
@@ -265,11 +304,10 @@ void FunctionRaisingInfo::recordDefinition(SDNode *OldOpNode, SDNode *NewNode) {
   }
 }
 
-void FunctionRaisingInfo::recordDefinition(const MachineInstr &MI,
-                                           unsigned OpNum, Value *Val) {
+void FunctionRaisingInfo::recordDefinition(const MachineInstr &MI, Value *Val) {
   assert(Val != nullptr &&
          "The new Value ptr is null when record define!");
-  auto *Op = &MI.getOperand(OpNum);
+  auto *Op = &MI.getOperand(0);
   if (Op->isReg()) {
     recordDefinition(Op->getReg(), Val);
   }
