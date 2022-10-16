@@ -838,19 +838,19 @@ void ARMMachineInstructionRaiser::emitInstr(
       // Update N Flag.
       Value *NCmp = IRB.getInt32(8);
       Value *NFlag = IRB.CreateICmpEQ(Shift, NCmp);
-      IRB.CreateStore(NFlag, FuncInfo->AllocaMap[0]);
+      saveNFlag(BB, NFlag);
       // Update Z Flag.
       Value *ZCmp = IRB.getInt32(4);
       Value *ZFlag = IRB.CreateICmpEQ(Shift, ZCmp);
-      IRB.CreateStore(ZFlag, FuncInfo->AllocaMap[1]);
+      saveZFlag(BB, ZFlag);
       // Update C Flag.
       Value *CCmp = IRB.getInt32(2);
       Value *CFlag = IRB.CreateICmpEQ(Shift, CCmp);
-      IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
+      saveCFlag(BB, CFlag);
       // Update V Flag.
       Value *VCmp = IRB.getInt32(1);
       Value *VFlag = IRB.CreateICmpEQ(Shift, VCmp);
-      IRB.CreateStore(VFlag, FuncInfo->AllocaMap[3]);
+      saveVFlag(BB, VFlag);
     } else {
       // Pattern msr CSR_f, #const.
     }
@@ -1100,8 +1100,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     if (NPI->HasCPSR) {
       if (NPI->UpdateCPSR) {
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
-        Value *CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+        Value *CFlag = loadCFlag(BB);
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
@@ -1114,7 +1113,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         // Update C flag.
         // c flag = s0[0]
         CFlag = IRB.CreateAnd(S0, Val1);
-        IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
+        saveCFlag(BB, CFlag);
       } else {
         // Create new BB for EQ instruction execute.
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
@@ -1127,8 +1126,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag = nullptr;
 
-        CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+        CFlag = loadCFlag(BB);
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
@@ -1142,8 +1140,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       }
     } else {
       Value *InstLShr = IRB.CreateLShr(S0, Val1);
-      Value *CFlag =
-          callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+      Value *CFlag = loadCFlag(BB);
       CFlag = IRB.CreateZExt(CFlag, Ty);
       Value *Bit31 = IRB.CreateShl(CFlag, Val2);
       Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
@@ -1242,8 +1239,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
 
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+    Value *CFlag = loadCFlag(BB);
     Value *CZext = IRB.CreateZExt(CFlag, getDefaultType());
 
     Value *Inst = IRB.CreateAdd(S0, CZext);
@@ -1301,8 +1297,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       if (NPI->UpdateCPSR) {
         Value *InstSub = IRB.CreateSub(S1, S2);
         Value *CFlag = nullptr;
-        CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+        CFlag = loadCFlag(BB);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
         FuncInfo->setRealValue(Node, InstSBC);
@@ -1320,8 +1315,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(S1, S2);
         Value *CFlag = nullptr;
-        CFlag =
-            callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+        CFlag = loadCFlag(BB);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *Inst = IRB.CreateAdd(InstSub, CZext);
         PHINode *Phi = createAndEmitPHINode(MI, BB, IfBB, ElseBB,
@@ -1336,8 +1330,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     } else {
       Value *InstSub = IRB.CreateSub(S1, S2);
       Value *CFlag = nullptr;
-      CFlag =
-          callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+      CFlag = loadCFlag(BB);
       Value *CZext = IRB.CreateZExt(CFlag, Ty);
       Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
       FuncInfo->setRealValue(Node, InstSBC);
@@ -1611,14 +1604,10 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *BitCShift = IRB.getInt32(29);
     Value *BitVShift = IRB.getInt32(28);
 
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
+    Value *NFlag = loadNFlag(BB);
+    Value *ZFlag = loadZFlag(BB);
+    Value *CFlag = loadCFlag(BB);
+    Value *VFlag = loadVFlag(BB);
 
     NFlag = IRB.CreateZExt(NFlag, Ty);
     ZFlag = IRB.CreateZExt(ZFlag, Ty);

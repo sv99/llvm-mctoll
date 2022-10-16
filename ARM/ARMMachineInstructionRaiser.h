@@ -235,7 +235,14 @@ private:
   void emitSpecialCPSR(Value *Result, BasicBlock *BB, unsigned Flag);
   void emitCondCode(unsigned CondValue,
                     BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
+  Value *loadNFlag(BasicBlock *BB);
+  Value *loadZFlag(BasicBlock *BB);
   Value *loadCFlag(BasicBlock *BB);
+  Value *loadVFlag(BasicBlock *BB);
+  void saveNFlag(BasicBlock *BB, Value *NFlag);
+  void saveZFlag(BasicBlock *BB, Value *ZFlag);
+  void saveCFlag(BasicBlock *BB, Value *CFlag);
+  void saveVFlag(BasicBlock *BB, Value *VFlag);
 
   void emitADC(BasicBlock *BB, NodePropertyInfo *NPI);
   void emitLoad(BasicBlock *BB, const MachineInstr &MI);
@@ -245,10 +252,10 @@ private:
   PHINode *createAndEmitPHINode(const MachineInstr &MI,
                                 BasicBlock *BB, BasicBlock *IfBB,
                                 BasicBlock *ElseBB, Instruction *IfInst);
+
   PointerType *getPointerType() {
     return Type::getIntNPtrTy(Ctx, MF.getDataLayout().getPointerSizeInBits());
   }
-
   Type *getIntTypeByPtr(Type *PTy);
 
   // Wrapper to call new  Create*Load APIs

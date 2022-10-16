@@ -25,128 +25,6 @@ using namespace llvm::mctoll;
 static const std::vector<StringRef> CPSR({"N_Flag", "Z_Flag", "C_Flag",
                                           "V_Flag"});
 
-/// Match condition state, make corresponding processing.
-void ARMMachineInstructionRaiser::emitCondCode(
-    unsigned CondValue, BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB) {
-  IRBuilder<> IRB(BB);
-
-  switch (CondValue) {
-  default:
-    break;
-  case ARMCC::EQ: { // EQ  Z set
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *InstEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::NE: { // NE Z clear
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *InstEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::HS: { // CS  C set
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-    Value *InstEQ = IRB.CreateICmpEQ(CFlag, IRB.getTrue());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::LO: { // CC  C clear
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-    Value *InstEQ = IRB.CreateICmpEQ(CFlag, IRB.getFalse());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::MI: { // MI  N set
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *InstEQ = IRB.CreateICmpEQ(NFlag, IRB.getTrue());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::PL: { // PL  N clear
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *InstEQ = IRB.CreateICmpEQ(NFlag, IRB.getFalse());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::VS: { // VS  V set
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstEQ = IRB.CreateICmpEQ(VFlag, IRB.getTrue());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::VC: { // VC  V clear
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstEQ = IRB.CreateICmpEQ(VFlag, IRB.getFalse());
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::HI: { // HI  C set & Z clear
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *InstCEQ = IRB.CreateICmpEQ(CFlag, IRB.getTrue());
-    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
-    Value *CondPass = IRB.CreateICmpEQ(InstCEQ, InstZEQ);
-    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
-  } break;
-  case ARMCC::LS: { // LS  C clear or Z set
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *InstCEQ = IRB.CreateICmpEQ(CFlag, IRB.getFalse());
-    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
-    Value *CondPass = IRB.CreateXor(InstCEQ, InstZEQ);
-    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
-  } break;
-  case ARMCC::GE: { // GE  N = V
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstEQ = IRB.CreateICmpEQ(NFlag, VFlag);
-    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
-  } break;
-  case ARMCC::LT: { // LT  N != V
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstNE = IRB.CreateICmpNE(NFlag, VFlag);
-    IRB.CreateCondBr(InstNE, IfBB, ElseBB);
-  } break;
-  case ARMCC::GT: { // GT  Z clear & N = V
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
-    Value *InstNZEQ = IRB.CreateICmpEQ(NFlag, VFlag);
-    Value *CondPass = IRB.CreateICmpEQ(InstZEQ, InstNZEQ);
-    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
-  } break;
-  case ARMCC::LE: { // LE  Z set or N != V
-    Value *NFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
-    Value *ZFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
-    Value *VFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
-    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
-    Value *InstNZNE = IRB.CreateICmpNE(NFlag, VFlag);
-    Value *CondPass = IRB.CreateXor(InstZEQ, InstNZNE);
-    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
-  } break;
-  case ARMCC::AL: { // AL
-    assert(false && "Emit conditional code [ARMCC::AL]. Should not get here!");
-  } break;
-  }
-}
-
 /// Create PHINode for value use selection when running.
 PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
     const MachineInstr &MI,
@@ -165,6 +43,106 @@ PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
 
   Phi->addIncoming(IfInst, IfBB);
   return Phi;
+}
+
+/// Match condition state, make corresponding processing.
+void ARMMachineInstructionRaiser::emitCondCode(
+    unsigned CondValue, BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB) {
+  IRBuilder<> IRB(BB);
+
+  switch (CondValue) {
+  default:
+    break;
+  case ARMCC::EQ: { // EQ  Z set
+    Value *ZFlag = loadZFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::NE: { // NE Z clear
+    Value *ZFlag = loadZFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::HS: { // CS  C set
+    Value *CFlag = loadCFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(CFlag, IRB.getTrue());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::LO: { // CC  C clear
+    Value *CFlag = loadCFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(CFlag, IRB.getFalse());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::MI: { // MI  N set
+    Value *NFlag = loadNFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(NFlag, IRB.getTrue());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::PL: { // PL  N clear
+    Value *NFlag = loadNFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(NFlag, IRB.getFalse());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::VS: { // VS  V set
+    Value *VFlag = loadVFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(VFlag, IRB.getTrue());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::VC: { // VC  V clear
+    Value *VFlag = loadVFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(VFlag, IRB.getFalse());
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::HI: { // HI  C set & Z clear
+    Value *CFlag = loadCFlag(BB);
+    Value *ZFlag = loadZFlag(BB);
+    Value *InstCEQ = IRB.CreateICmpEQ(CFlag, IRB.getTrue());
+    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
+    Value *CondPass = IRB.CreateICmpEQ(InstCEQ, InstZEQ);
+    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
+  } break;
+  case ARMCC::LS: { // LS  C clear or Z set
+    Value *CFlag = loadCFlag(BB);
+    Value *ZFlag = loadZFlag(BB);
+    Value *InstCEQ = IRB.CreateICmpEQ(CFlag, IRB.getFalse());
+    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
+    Value *CondPass = IRB.CreateXor(InstCEQ, InstZEQ);
+    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
+  } break;
+  case ARMCC::GE: { // GE  N = V
+    Value *NFlag = loadNFlag(BB);
+    Value *VFlag = loadVFlag(BB);
+    Value *InstEQ = IRB.CreateICmpEQ(NFlag, VFlag);
+    IRB.CreateCondBr(InstEQ, IfBB, ElseBB);
+  } break;
+  case ARMCC::LT: { // LT  N != V
+    Value *NFlag = loadNFlag(BB);
+    Value *VFlag = loadVFlag(BB);
+    Value *InstNE = IRB.CreateICmpNE(NFlag, VFlag);
+    IRB.CreateCondBr(InstNE, IfBB, ElseBB);
+  } break;
+  case ARMCC::GT: { // GT  Z clear & N = V
+    Value *NFlag = loadNFlag(BB);
+    Value *ZFlag = loadZFlag(BB);
+    Value *VFlag = loadVFlag(BB);
+    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getFalse());
+    Value *InstNZEQ = IRB.CreateICmpEQ(NFlag, VFlag);
+    Value *CondPass = IRB.CreateICmpEQ(InstZEQ, InstNZEQ);
+    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
+  } break;
+  case ARMCC::LE: { // LE  Z set or N != V
+    Value *NFlag = loadNFlag(BB);
+    Value *ZFlag = loadZFlag(BB);
+    Value *VFlag = loadVFlag(BB);
+    Value *InstZEQ = IRB.CreateICmpEQ(ZFlag, IRB.getTrue());
+    Value *InstNZNE = IRB.CreateICmpNE(NFlag, VFlag);
+    Value *CondPass = IRB.CreateXor(InstZEQ, InstNZNE);
+    IRB.CreateCondBr(CondPass, IfBB, ElseBB);
+  } break;
+  case ARMCC::AL: { // AL
+    assert(false && "Emit conditional code [ARMCC::AL]. Should not get here!");
+  } break;
+  }
 }
 
 /// Update the N Z C V flags of global variable.
@@ -198,20 +176,20 @@ void ARMMachineInstructionRaiser::emitCPSR(
   // Update N flag.
   Value *NFlag = IRB.CreateLShr(Result, IRB.getInt32(31));
   Value *NTrunc = IRB.CreateTrunc(NFlag, Ty);
-  IRB.CreateStore(NTrunc, FuncInfo->AllocaMap[0]);
+  saveNFlag(BB, NTrunc);
 
   // Update Z flag.
   Value *ZFlag = IRB.CreateICmpEQ(Result, IRB.getInt32(0));
   Value *ZTrunc = IRB.CreateTrunc(ZFlag, Ty);
-  IRB.CreateStore(ZTrunc, FuncInfo->AllocaMap[1]);
+  saveZFlag(BB, ZTrunc);
 
   // Update C flag.
   Value *CFlag = ExtractValueInst::Create(UnsignedSum, 1, "", BB);
-  IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
+  saveCFlag(BB, CFlag);
 
   // Update V flag.
   Value *VFlag = ExtractValueInst::Create(SignedSum, 1, "", BB);
-  IRB.CreateStore(VFlag, FuncInfo->AllocaMap[3]);
+  saveVFlag(BB, VFlag);
 }
 
 /// Update the N Z flags of global variable.
@@ -222,16 +200,49 @@ void ARMMachineInstructionRaiser::emitSpecialCPSR(
   // Update N flag.
   Value *NFlag = IRB.CreateLShr(Result, IRB.getInt32(31));
   NFlag = IRB.CreateTrunc(NFlag, Ty);
-  IRB.CreateStore(NFlag, FuncInfo->AllocaMap[0]);
+  saveNFlag(BB, NFlag);
   // Update Z flag.
   Value *ZFlag = IRB.CreateICmpEQ(Result, IRB.getInt32(0));
+  saveZFlag(BB, ZFlag);
+}
 
-  IRB.CreateStore(ZFlag, FuncInfo->AllocaMap[1]);
+/// Load N flag from stack allocation.
+Value *ARMMachineInstructionRaiser::loadNFlag(BasicBlock *BB) {
+  return callCreateAlignedLoad(BB, FuncInfo->AllocaMap[0]);
+}
+
+/// Load Z flag from stack allocation.
+Value *ARMMachineInstructionRaiser::loadZFlag(BasicBlock *BB) {
+  return callCreateAlignedLoad(BB, FuncInfo->AllocaMap[1]);
 }
 
 /// Load C flag from stack allocation.
 Value *ARMMachineInstructionRaiser::loadCFlag(BasicBlock *BB) {
   return callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+}
+
+/// Load V flag from stack allocation.
+Value *ARMMachineInstructionRaiser::loadVFlag(BasicBlock *BB) {
+  return callCreateAlignedLoad(BB, FuncInfo->AllocaMap[3]);
+}
+
+void ARMMachineInstructionRaiser::saveNFlag(BasicBlock *BB, Value *NFlag) {
+  IRBuilder<> IRB(BB);
+  IRB.CreateStore(NFlag, FuncInfo->AllocaMap[0]);
+}
+
+void ARMMachineInstructionRaiser::saveZFlag(BasicBlock *BB, Value *ZFlag) {
+  IRBuilder<> IRB(BB);
+  IRB.CreateStore(ZFlag, FuncInfo->AllocaMap[1]);
+}
+
+void ARMMachineInstructionRaiser::saveCFlag(BasicBlock *BB, Value *CFlag) {
+  IRBuilder<> IRB(BB);
+  IRB.CreateStore(CFlag, FuncInfo->AllocaMap[2]);
+}
+void ARMMachineInstructionRaiser::saveVFlag(BasicBlock *BB, Value *VFlag) {
+  IRBuilder<> IRB(BB);
+  IRB.CreateStore(VFlag, FuncInfo->AllocaMap[3]);
 }
 
 Type *ARMMachineInstructionRaiser::getIntTypeByPtr(Type *PTy) {
@@ -300,8 +311,7 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRShl(
   CFlag = IRB.CreateShl(S0, CFlag);
   CFlag = IRB.CreateLShr(CFlag, IRB.getInt32(31));
   Value *CTrunc = IRB.CreateTrunc(CFlag, Ty);
-
-  IRB.CreateStore(CTrunc, FuncInfo->AllocaMap[2]);
+  saveCFlag(BB, CTrunc);
 }
 
 void ARMMachineInstructionRaiser::emitBinaryCPSRLShr(
@@ -320,8 +330,7 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRLShr(
   CFlag = IRB.CreateLShr(S0, CFlag);
   CFlag = IRB.CreateAnd(CFlag, Val);
   Value *CTrunc = IRB.CreateTrunc(CFlag, Ty);
-
-  IRB.CreateStore(CTrunc, FuncInfo->AllocaMap[2]);
+  saveCFlag(BB, CTrunc);
 }
 
 void ARMMachineInstructionRaiser::emitBinaryCPSRAShr(
@@ -340,7 +349,7 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRAShr(
   CFlag = IRB.CreateAShr(S0, CFlag);
   CFlag = IRB.CreateAnd(CFlag, Val);
   Value *CTrunc = IRB.CreateTrunc(CFlag, Ty);
-  IRB.CreateStore(CTrunc, FuncInfo->AllocaMap[2]);
+  saveCFlag(BB, CTrunc);
 }
 
 void ARMMachineInstructionRaiser::emitBinaryCPSRAnd(
@@ -516,8 +525,7 @@ void ARMMachineInstructionRaiser::emitADC(
     }
   } else {
     // ADC
-    Value *CFlag =
-        callCreateAlignedLoad(BB, FuncInfo->AllocaMap[2]);
+    Value *CFlag = loadCFlag(BB);
     Value *Inst = IRB.CreateAdd(S0, S1);
     Value *CTrunc = IRB.CreateZExtOrTrunc(CFlag, getDefaultType());
     Value *InstADC = IRB.CreateAdd(Inst, CTrunc);
@@ -659,7 +667,6 @@ void ARMMachineInstructionRaiser::emitBRD(
     BasicBlock *BB, const MachineInstr &MI) {
   auto *NPI = FuncInfo->getNPI(MI);
   auto *Node = NPI->Node;
-  // unsigned Opc = Node->getOpcode();
   IRBuilder<> IRB(BB);
   auto *DLT = &M->getDataLayout();
   IRB.SetCurrentDebugLocation(MI.getDebugLoc());
