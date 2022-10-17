@@ -216,6 +216,7 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
   NodeInfo->HasCPSR = false;
   NodeInfo->Special = false;
   NodeInfo->UpdateCPSR = false;
+  NodeInfo->IsCond = false;
 
   // Number of operands for MachineInstr.
   int NumOps = MI.getNumOperands();
@@ -228,11 +229,14 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
 
   // ARM::CPSR register use index in MachineInstr.
   int Idx = MI.findRegisterUseOperandIdx(ARM::CPSR);
-  // If the MachineInstr has ARM::CPSR register, update the NodePropertyInfo
-  // properties.
+  // If the MachineInstr has explicit ARM::CPSR register,
+  // update the NodePropertyInfo.
   if (Idx != -1 && !MI.getOperand(Idx).isImplicit()) {
     // MI with ARM::CPSR register.
+    NodeInfo->HasCPSR = true;
+    // Find condition.
     if (Idx != NumOps - 1) {
+      // First ARM::CPSR not last operand, check next operand.
       if (MI.getOperand(Idx + 1).isReg() &&
           MI.getOperand(Idx + 1).getReg() == ARM::CPSR) {
         // Pattern matching: addseq r0, r0, 0
@@ -241,32 +245,32 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
 
         NodeInfo->Cond = MI.getOperand(Idx - 1).getImm();
         NodeInfo->Special = true;
+        NodeInfo->UpdateCPSR = true;
+        NodeInfo->IsCond = NodeInfo->Cond != ARMCC::AL;
       } else {
         // Pattern matching: addeq r0, r0, 0
         for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
           if (MI.getOperand(Idx - OpIdx).isImm()) {
             NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
+            NodeInfo->IsCond = NodeInfo->Cond != ARMCC::AL;
             break;
           }
         }
       }
     } else {
+      // First ARM::CPSR is the last operand.
       if (MI.getOperand(Idx - 1).isReg() &&
           MI.getOperand(Idx - 1).getReg() == ARM::CPSR) {
         for (int OpIdx = 1; OpIdx < NumOps; OpIdx++) {
           if (MI.getOperand(Idx - OpIdx).isImm()) {
             NodeInfo->Special = true;
             NodeInfo->Cond = MI.getOperand(Idx - OpIdx).getImm();
+            NodeInfo->IsCond = NodeInfo->Cond != ARMCC::AL;
             break;
           }
         }
       }
     }
-    // Pattern matching: adds r0, r0, 0
-    if (NodeInfo->Cond == ARMCC::AL)
-      NodeInfo->UpdateCPSR = true;
-
-    NodeInfo->HasCPSR = true;
   }
   NPMap[&MI] = NodeInfo;
   return NodeInfo;
@@ -304,10 +308,13 @@ void FunctionRaisingInfo::recordDefinition(SDNode *OldOpNode, SDNode *NewNode) {
   }
 }
 
-void FunctionRaisingInfo::recordDefinition(const MachineInstr &MI, Value *Val) {
+void FunctionRaisingInfo::recordDefinition(NodePropertyInfo *NPI, Value *Val) {
   assert(Val != nullptr &&
          "The new Value ptr is null when record define!");
-  auto *Op = &MI.getOperand(0);
+  // update Node records TODO remove after full update
+  setRealValue(NPI->Node, Val);
+  setArgValue(NPI->Node, Val);
+  auto *Op = &NPI->MI->getOperand(0);
   if (Op->isReg()) {
     recordDefinition(Op->getReg(), Val);
   }

@@ -188,9 +188,10 @@ void ARMMachineInstructionRaiser::selectBasicBlock(MachineBasicBlock *MBB) {
 
   auto *BB = FuncInfo->getOrCreateBasicBlock(MBB);
   auto *CurDAG = &FuncInfo->getCurDAG();
+  IRBuilder<> IRB(BB);
 
   for (MachineInstr &MI : MBB->instrs()) {
-    emitInstr(BB, MI);
+    emitInstr(IRB, MI);
   }
 
   LLVM_DEBUG(dbgs() << "DUG after start.\n");

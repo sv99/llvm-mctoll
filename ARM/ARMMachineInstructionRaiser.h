@@ -196,62 +196,73 @@ private:
   /// Gets the Metadata of given SDNode.
   SDValue getMDOperand(SDNode *N);
 
-  /// visit - Collects the information of each MI to create SDNodes.
+  /// visit - create SDNodes from MI.
   SDNode *visit(const MachineInstr &MI);
 
   // IR emitter functions
 
   /// Emit code for single MachineInstruction.
-  void emitInstr(BasicBlock *BB, const MachineInstr &MI);
+  void emitInstr(IRBuilder<> &IRB, const MachineInstr &MI);
 
   // Emit binary operations.
-  void emitBinaryAdd(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinarySub(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryMul(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryShl(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryLShr(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryAShr(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryAnd(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryOr(BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryXor(BasicBlock *BB, const MachineInstr &MI);
+  Value *emitBinaryAdd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
+  Value *emitBinarySub(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
+  Value *emitBinaryMul(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
+  Value *emitBinaryShl(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
+  Value *emitBinaryLShr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                      Value *S0, Value *S1);
+  Value *emitBinaryAShr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                      Value *S0, Value *S1);
+  Value *emitBinaryAnd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
+  Value *emitBinaryOr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                    Value *S0, Value *S1);
+  Value *emitBinaryXor(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                     Value *S0, Value *S1);
 
   // Update the N Z C V flags for binary operation, called from macros.
-  void emitBinaryCPSRAdd(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRSub(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRMul(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRShl(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRLShr(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRAShr(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRAnd(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSROr(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
-  void emitBinaryCPSRXor(Value *Inst, BasicBlock *BB, const MachineInstr &MI);
+  void emitBinaryCPSRAdd(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRSub(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRMul(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRShl(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRLShr(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRAShr(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRAnd(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSROr(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
+  void emitBinaryCPSRXor(IRBuilder<> &IRB, const MachineInstr &MI, Value *Inst);
 
   // Working with flags.
 
   /// Update the N Z C V flags of global variable.
-  void emitCPSR(Value *Operand0, Value *Operand1,
-                BasicBlock *BB, unsigned Flag);
+  void emitCPSR(IRBuilder<> &IRB, Value *Operand0, Value *Operand1,
+                unsigned Flag);
+  void emitCMN(IRBuilder<> &IRB, Value *Operand0, Value *Operand1);
+  void emitCMP(IRBuilder<> &IRB, Value *Operand0, Value *Operand1);
   /// Update the N Z flags of global variable.
-  void emitSpecialCPSR(Value *Result, BasicBlock *BB, unsigned Flag);
-  void emitCondCode(unsigned CondValue,
-                    BasicBlock *BB, BasicBlock *IfBB, BasicBlock *ElseBB);
-  Value *loadNFlag(BasicBlock *BB);
-  Value *loadZFlag(BasicBlock *BB);
-  Value *loadCFlag(BasicBlock *BB);
-  Value *loadVFlag(BasicBlock *BB);
-  void saveNFlag(BasicBlock *BB, Value *NFlag);
-  void saveZFlag(BasicBlock *BB, Value *ZFlag);
-  void saveCFlag(BasicBlock *BB, Value *CFlag);
-  void saveVFlag(BasicBlock *BB, Value *VFlag);
+  void emitSpecialCPSR(IRBuilder<> &IRB, Value *Result, unsigned Flag);
+  void emitCondCode(IRBuilder<> &IRB, BasicBlock *IfBB, BasicBlock *ElseBB,
+                    unsigned CondValue);
+  Value *loadNFlag(IRBuilder<> &IRB);
+  Value *loadZFlag(IRBuilder<> &IRB);
+  Value *loadCFlag(IRBuilder<> &IRB);
+  Value *loadVFlag(IRBuilder<> &IRB);
+  void saveNFlag(IRBuilder<> &IRB, Value *NFlag);
+  void saveZFlag(IRBuilder<> &IRB, Value *ZFlag);
+  void saveCFlag(IRBuilder<> &IRB, Value *CFlag);
+  void saveVFlag(IRBuilder<> &IRB, Value *VFlag);
 
-  void emitADC(BasicBlock *BB, NodePropertyInfo *NPI);
-  void emitLoad(BasicBlock *BB, const MachineInstr &MI);
-  void emitStore(BasicBlock *BB, const MachineInstr &MI);
-  void emitBRD(BasicBlock *BB, const MachineInstr &MI);
+  Value *emitADC(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  Value *emitLoad(IRBuilder<> &IRB, const MachineInstr &MI);
+  void emitStore(IRBuilder<> &IRB, const MachineInstr &MI);
+  Value *emitBRD(IRBuilder<> &IRB, const MachineInstr &MI);
   /// Create PHINode for value use selection when running.
-  PHINode *createAndEmitPHINode(const MachineInstr &MI,
-                                BasicBlock *BB, BasicBlock *IfBB,
-                                BasicBlock *ElseBB, Instruction *IfInst);
+  PHINode *createAndEmitPHINode(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                                BasicBlock *IfBB, BasicBlock *ElseBB,
+                                Instruction *IfInst);
 
   PointerType *getPointerType() {
     return Type::getIntNPtrTy(Ctx, MF.getDataLayout().getPointerSizeInBits());
@@ -283,6 +294,26 @@ private:
   LoadInst *callCreateAlignedLoad(BasicBlock *BB, GlobalValue *ValPtr,
                                   MaybeAlign Align = MaybeAlign()) {
     IRBuilder<> IRB(BB);
+    return IRB.CreateAlignedLoad(ValPtr->getValueType(),
+                                 ValPtr, Align, "");
+  }
+
+  LoadInst *callCreateAlignedLoad(IRBuilder<> &IRB, Type *Ty, Value *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    return IRB.CreateAlignedLoad(Ty, ValPtr, Align, "");
+  }
+  LoadInst *callCreateAlignedLoad(IRBuilder<> &IRB, AllocaInst *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    return IRB.CreateAlignedLoad(ValPtr->getAllocatedType(),
+                                 ValPtr, Align, "");
+  }
+  LoadInst *callCreateAlignedLoad(IRBuilder<> &IRB, Value *AllocaValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
+    return callCreateAlignedLoad(IRB, dyn_cast<AllocaInst>(AllocaValPtr),
+                                 Align);
+  }
+  LoadInst *callCreateAlignedLoad(IRBuilder<> &IRB, GlobalValue *ValPtr,
+                                  MaybeAlign Align = MaybeAlign()) {
     return IRB.CreateAlignedLoad(ValPtr->getValueType(),
                                  ValPtr, Align, "");
   }
