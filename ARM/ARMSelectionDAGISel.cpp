@@ -203,11 +203,11 @@ void ARMMachineInstructionRaiser::selectBasicBlock(MachineBasicBlock *MBB) {
   // the return Value of each exit BasicBlock.
   Type *RTy = FuncInfo->getRaisedFunction()->getReturnType();
   if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
-    auto Reg = FuncInfo->getSDValueByRegister(ARM::R0);
-    auto *Val = FuncInfo->getRealValue(Reg.getNode());
+    auto *Val = FuncInfo->getArgValue(ARM::R0);
     Instruction *TInst = dyn_cast<Instruction>(Val);
     assert(TInst && "A def R0 was pointed to a non-instruction!!!");
     BasicBlock *TBB = TInst->getParent();
+    // TBB may don't be equal BB after inserting condition block.
     FuncInfo->RetValMap[TBB] = TInst;
   }
 

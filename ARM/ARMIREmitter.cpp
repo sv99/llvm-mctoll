@@ -166,8 +166,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->recordDefinition(Rd.getNode(), Node);
       NPI->Node = Node;
-      Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-      Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+      Value *S0 = FuncInfo->getOperand(NPI, 0);
+      Value *S1 = FuncInfo->getOperand(NPI, 1);
       Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
       FuncInfo->recordDefinition(NPI, Inst);
     }
@@ -210,8 +210,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinarySub(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -241,9 +241,9 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
-    Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
+    // MOV has exactly two operands Rd and Rn.
+    Value *S1 = FuncInfo->getOperand(NPI, 1, true);
+    Value *Inst = emitBinaryAdd(IRB, NPI, S1, IRB.getInt32(0));
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
   /* STR */
@@ -667,7 +667,9 @@ void ARMMachineInstructionRaiser::emitInstr(
     NPI->Node = Node;
     // set flags by result <Op1> - <Op2>
     // SBBS without store result
-
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
+    emitCMP(IRB, S0, S1);
   } break;
   /* AND */
   case ARM::ANDri:
@@ -706,8 +708,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryAnd(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
     // TODO:
@@ -748,8 +750,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryAShr(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -775,7 +777,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
-    emitBinaryAdd(IRB, NPI, S0, S1);
+    emitCMN(IRB, S0, S1);
   } break;
   /* EOR */
   case ARM::EORri:
@@ -813,8 +815,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
     // TODO:
@@ -892,8 +894,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryMul(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -953,8 +955,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryShl(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -989,8 +991,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryLShr(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -1029,8 +1031,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *S0 = FuncInfo->getIRValue(Node->getOperand(0));                       \
-    Value *S1 = FuncInfo->getIRValue(Node->getOperand(1));
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryOr(IRB, NPI, S0, S1);
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -1684,6 +1686,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     outs() << "WARNING: ARM::VTRN Not yet implemented!\n";
   } break;
     // TODO: Need to add other pattern matching here.
-    outs() << "!!WARNING!!: Unimplemented instruction!\n";
+    auto *TII = getMF().getSubtarget().getInstrInfo();
+    outs() << "WARNING: ARM::" << TII->getName(MI.getOpcode())
+           << " Not yet implemented!\n";
   }
 }

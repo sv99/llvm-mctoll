@@ -31,10 +31,9 @@ PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
     BasicBlock *IfBB, BasicBlock *ElseBB, Instruction *IfInst) {
   PHINode *Phi = PHINode::Create(getDefaultType(), 2, "", ElseBB);
 
-  auto *Node = NPI->Node;
   auto *BB = IRB.GetInsertBlock();
-  if (FuncInfo->checkArgValue(Node)) {
-    Phi->addIncoming(FuncInfo->getArgValue(Node), BB);
+  if (FuncInfo->checkArgValue(ARM::R0)) {
+    Phi->addIncoming(FuncInfo->getArgValue(ARM::R0), BB);
   } else {
     auto *Zero = ConstantInt::get(getDefaultType(), 0, true);
     Instruction *TermInst = BB->getTerminator();
@@ -138,8 +137,8 @@ void ARMMachineInstructionRaiser::emitCondCode(
     Value *CondPass = IRB.CreateXor(InstZEQ, InstNZNE);
     IRB.CreateCondBr(CondPass, IfBB, ElseBB);
   } break;
-  case ARMCC::AL: { // AL
-    assert(false && "Emit conditional code [ARMCC::AL]. Should not get here!");
+  case ARMCC::AL: { // AL Execute Always
+    // assert(false && "Emit conditional code [ARMCC::AL]. Should not get here!");
   } break;
   }
 }
@@ -269,7 +268,6 @@ void ARMMachineInstructionRaiser::emitCMP(
 /// Update the N Z flags of global variable.
 void ARMMachineInstructionRaiser::emitSpecialCPSR(
     IRBuilder<> &IRB, Value *Result, unsigned Flag) {
-  auto * BB = IRB.GetInsertBlock();
   Type *Ty = IRB.getInt1Ty();
   // Update N flag.
   Value *NFlag = IRB.CreateLShr(Result, IRB.getInt32(31));
@@ -434,7 +432,7 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRXor(
   /* How to deal with C Flag? */
 }
 
-#define HANDLE_BINARY_FUNC(OPCODE)                                             \
+#define HANDLE_BINARY_FUNC1(OPCODE)                                             \
   auto *BB = IRB.GetInsertBlock();                                             \
   Value *Result = nullptr;                                                     \
   if (NPI->HasCPSR) {                                                          \
@@ -476,6 +474,14 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRXor(
     CBB->getInstList().push_back(dyn_cast<Instruction>(Result));                 \
   }                                                                            \
   return Result;
+
+#define HANDLE_BINARY_FUNC(OPCODE)                                             \
+  checkConditionBegin(IRB, NPI);                                               \
+  Value *Result = IRB.Insert(BinaryOperator::Create##OPCODE(S0, S1));          \
+  auto EmitUpdate = [&, this]() {                                              \
+    emitBinaryCPSR##OPCODE(IRB, *NPI->MI, Result);                             \
+  };                                                                           \
+  return checkConditionEnd( IRB, NPI, Result, EmitUpdate);
 
 Value *ARMMachineInstructionRaiser::emitBinaryAdd(
     IRBuilder<> &IRB, NodePropertyInfo *NPI, Value *S0, Value *S1) {
@@ -532,44 +538,60 @@ static uint64_t getMCInstIndex(const MachineInstr &MI) {
   return ArbPrecInt.getSExtValue();
 }
 
-Value * ARMMachineInstructionRaiser::emitADC(
+void ARMMachineInstructionRaiser::checkConditionBegin(
     IRBuilder<> &IRB, NodePropertyInfo *NPI) {
+
   auto *BB = IRB.GetInsertBlock();
-  Value *S0 = FuncInfo->getOperand(NPI, 0);
-  Value *S1 = FuncInfo->getOperand(NPI, 1);
-  BasicBlock *IfBB = nullptr;
-  BasicBlock *ElseBB = nullptr;
   // Check condition pattern ADC<c> <Rdn>,<Rm>
   if (NPI->HasCPSR && NPI->IsCond) {
     // Condition pattern ADC<c> <Rdn>,<Rm>
     // Create new BB for EQ instruction execute.
-    IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    NPI->IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
     // Create new BB to update the DAG BB.
-    ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    NPI->ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
     // Emit the condition code.
-    emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
-    IRB.SetInsertPoint(IfBB);
+    emitCondCode(IRB, NPI->IfBB, NPI->ElseBB, NPI->Cond);
+    IRB.SetInsertPoint(NPI->IfBB);
   }
+}
+
+Value *ARMMachineInstructionRaiser::checkConditionEnd(
+    IRBuilder<> &IRB, NodePropertyInfo *NPI, Value *Result,
+    std::function<void()> EmitUpdate) {
+  if (NPI->HasCPSR) {
+    if (NPI->UpdateCPSR) {
+      // Pattern: ADCS <Rdn>,<Rm>
+      // S suffix - call lambda for update flags.
+      EmitUpdate();
+    }
+    // If exists condition block then emit Phi node
+    if (NPI->IsCond) {
+      // ADC<c> <Rdn>,<Rm>
+      Result = createAndEmitPHINode(IRB, NPI, NPI->IfBB, NPI->ElseBB,
+                                    dyn_cast<Instruction>(Result));
+      IRB.CreateBr(NPI->ElseBB);
+      IRB.SetInsertPoint(NPI->ElseBB);
+    }
+  }
+  return Result;
+}
+
+Value *ARMMachineInstructionRaiser::emitADC(
+    IRBuilder<> &IRB, NodePropertyInfo *NPI) {
+  Value *S0 = FuncInfo->getOperand(NPI, 0);
+  Value *S1 = FuncInfo->getOperand(NPI, 1);
+  // Check condition begin.
+  checkConditionBegin(IRB, NPI);
   // Calculate block.
   Value *CFlag = loadCFlag(IRB);
   Value *CZext = IRB.CreateZExtOrTrunc(CFlag, getDefaultType());
   Value *Op0 = IRB.CreateAdd(S0, CZext);
   Value *Result = IRB.CreateAdd(Op0, S1);
-  if (NPI->HasCPSR) {
-    // Check S suffix for pattern: ADCS <Rdn>,<Rm>
-    if (NPI->UpdateCPSR) {
-      emitCMN(IRB, Op0, S1);
-    }
-    // If condition then emit Phi node
-    if (NPI->IsCond) {
-      // ADCS<c> <Rdn>,<Rm>
-      Result = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,
-                                    dyn_cast<Instruction>(Result));
-      IRB.CreateBr(ElseBB);
-      IRB.SetInsertPoint(ElseBB);
-    }
-  }
-  return Result;
+  // Check condition end.
+  auto EmitUpdate = [&, this]() {
+    emitCMN(IRB, Op0, S1);
+  };
+  return checkConditionEnd( IRB, NPI, Result, EmitUpdate);
 }
 
 Value *ARMMachineInstructionRaiser::emitLoad(

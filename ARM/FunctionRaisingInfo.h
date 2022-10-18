@@ -64,6 +64,10 @@ typedef struct {
   unsigned Cond;
   const MachineInstr *MI;
   SDNode *Node;
+  /// If basic block for conditional instruction.
+  BasicBlock *IfBB;
+  /// Else basic block for conditional instruction.
+  BasicBlock *ElseBB;
 } NodePropertyInfo;
 
 /// This contains information that is global to a function that is used when
@@ -150,16 +154,21 @@ public:
   void setRegisterValue(Register Reg, Value *V);
   /// Get IR value for the MI operand.
   Value *getOperand(const MachineInstr &MI, unsigned Num);
-  Value *getOperand(NodePropertyInfo *NPI, unsigned Num);
+  Value *getOperand(NodePropertyInfo *NPI, unsigned Num,
+                    bool Exact = false);
   /// Get IR value for the SDValue operand.
   Value *getIRValue(SDValue Val);
 
   Value *getArgValue(SDNode *Node) { return ArgValMap[NodeRegMap[Node]]; }
   Value *getArgValue(Register Reg) { return ArgValMap[Reg]; }
-  void setArgValue(SDNode *Node, Value *V) { ArgValMap[NodeRegMap[Node]] = V; }
   void setNodeReg(SDNode *Node, Register Reg) { NodeRegMap[Node] = Reg; }
+  void setArgValue(SDNode *Node, Value *V) { ArgValMap[NodeRegMap[Node]] = V; }
   bool checkArgValue(SDNode *Node) {
-    return ArgValMap.count(NodeRegMap[Node]) > 0;
+    return checkArgValue(NodeRegMap[Node]);
+  }
+  Value *getNodeValue(NodePropertyInfo *NPI) { return NPVMap[NPI]; }
+  bool checkArgValue(Register Reg) {
+    return ArgValMap.count(Reg) > 0;
   }
 
 private:
@@ -173,7 +182,7 @@ private:
   /// The map of physical register with related IR Value. It is used to convert
   /// physical registers to SSA form IR Values.
   DenseMap<Register, SDNode *> RegNodeMap;
-  /// The map for current register its IR value.
+  /// The map of the physical register with related IR value.
   DenseMap<Register, Value *> RegVMap;
   /// The map for each SDNode with its IR value.
   DenseMap<SDNode *, Value *> VMap;
@@ -184,6 +193,8 @@ private:
   DenseMap<Register, Value *> ArgValMap;
   /// Set register for SDNode mapping.
   DenseMap<SDNode *, Register> NodeRegMap;
+  /// The map for the NodePropertyInfo its IR value (last).
+  DenseMap<NodePropertyInfo *, Value *> NPVMap;
 
 
   /// ValueMap - Since we emit code for the function a basic block at a time,

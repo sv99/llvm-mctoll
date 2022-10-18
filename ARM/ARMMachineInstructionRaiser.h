@@ -204,6 +204,12 @@ private:
   /// Emit code for single MachineInstruction.
   void emitInstr(IRBuilder<> &IRB, const MachineInstr &MI);
 
+  /// Check if instruction is conditional and emit begin for the If-Else block.
+  void checkConditionBegin(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  /// For conditional instruction emit end for the If-Elseblock.
+  Value *checkConditionEnd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                           Value *Result, std::function<void()> EmitUpdate);
+
   // Emit binary operations.
   Value *emitBinaryAdd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
                      Value *S0, Value *S1);
