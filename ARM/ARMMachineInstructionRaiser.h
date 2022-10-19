@@ -262,9 +262,12 @@ private:
   void saveVFlag(IRBuilder<> &IRB, Value *VFlag);
 
   Value *emitADC(IRBuilder<> &IRB, NodePropertyInfo *NPI);
-  Value *emitLoad(IRBuilder<> &IRB, const MachineInstr &MI);
-  void emitStore(IRBuilder<> &IRB, const MachineInstr &MI);
-  Value *emitBRD(IRBuilder<> &IRB, const MachineInstr &MI);
+  Value *emitLoad(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  void emitStore(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  void emitBL(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  void emitSwitchInstr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+                       BasicBlock *BB);
+  Value *emitBRD(IRBuilder<> &IRB, NodePropertyInfo *NPI);
   /// Create PHINode for value use selection when running.
   PHINode *createAndEmitPHINode(IRBuilder<> &IRB, NodePropertyInfo *NPI,
                                 BasicBlock *IfBB, BasicBlock *ElseBB,

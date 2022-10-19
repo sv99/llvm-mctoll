@@ -140,8 +140,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->recordDefinition(Rd.getNode(), Node);
       NPI->Node = Node;
-      Value *LoadInst = emitLoad(IRB, MI);
-      FuncInfo->recordDefinition(NPI, LoadInst);
+//      Value *LoadInst = emitLoad(IRB, MI);
+//      FuncInfo->recordDefinition(NPI, LoadInst);
     } else {
       if (NPI->IsTwoAddress) {
         if (RegisterSDNode::classof(N->getOperand(1).getNode()))
@@ -166,11 +166,15 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->recordDefinition(Rd.getNode(), Node);
       NPI->Node = Node;
-      Value *S0 = FuncInfo->getOperand(NPI, 0);
-      Value *S1 = FuncInfo->getOperand(NPI, 1);
-      Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
-      FuncInfo->recordDefinition(NPI, Inst);
+//      Value *S0 = FuncInfo->getOperand(NPI, 0);
+//      Value *S1 = FuncInfo->getOperand(NPI, 1);
+//      Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
+//      FuncInfo->recordDefinition(NPI, Inst);
     }
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
+    Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
+    FuncInfo->recordDefinition(NPI, Inst);
   } break;
   /* SUB */
   case ARM::SUBri:
@@ -241,8 +245,8 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    // MOV has exactly two operands Rd and Rn.
-    Value *S1 = FuncInfo->getOperand(NPI, 1, true);
+    // Get exactly second operand.
+    Value *S1 = FuncInfo->getOperand(*NPI->MI, 1);
     Value *Inst = emitBinaryAdd(IRB, NPI, S1, IRB.getInt32(0));
     FuncInfo->recordDefinition(NPI, Inst);
   } break;
@@ -276,7 +280,7 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
-    emitStore(IRB, MI);
+    emitStore(IRB, NPI);
   } break;
   case ARM::STRH:
   case ARM::STRH_PRE:
@@ -306,7 +310,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
 
     NPI->Node = Node;
-    emitStore(IRB, MI);
+    emitStore(IRB, NPI);
   } break;
   case ARM::STRBi12:
   case ARM::STRBrs:
@@ -339,7 +343,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     }
 
     NPI->Node = Node;
-    emitStore(IRB, MI);
+    emitStore(IRB, NPI);
   } break;
   /* LDR */
   case ARM::LDRi12:
@@ -363,7 +367,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *LoadInst = emitLoad(IRB, MI);
+    Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
   case ARM::LDRH:
@@ -386,7 +390,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *LoadInst = emitLoad(IRB, MI);
+    Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
   case ARM::LDRBi12:
@@ -413,7 +417,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-    Value *LoadInst = emitLoad(IRB, MI);
+    Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
   /* Branch */
@@ -428,15 +432,22 @@ void ARMMachineInstructionRaiser::emitInstr(
                  ->getNode(ISD::BRCOND, Dl, getDefaultEVT(FuncInfo), Iftrue,
                            Cond, getMDOperand(N))
                  .getNode();
-
-      const MachineBasicBlock *LMBB = MI.getParent();
-      if (LMBB->succ_size() == 0) {
-        FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-        FuncInfo->setNodeReg(Node, ARM::R0);
-      }
-      NPI->Node = Node;
-      unsigned CondVal = cast<ConstantSDNode>(Node->getOperand(1))->getZExtValue();
+    } else {
+      Node = CurDAG
+                 ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), Iftrue,
+                           getMDOperand(N))
+                 .getNode();
+    }
+    const MachineBasicBlock *LMBB = MI.getParent();
+    if (LMBB->succ_size() == 0) {
+      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
+      FuncInfo->setNodeReg(Node, ARM::R0);
+    }
+    NPI->Node = Node;
+    // emit
+    if (NPI->HasCPSR) {
       // br i1 %cmp, label %if.then, label %if.else
+      unsigned CondVal = NPI->Cond;
       MachineBasicBlock *MBB = FuncInfo->getMBB(BB);
       MachineBasicBlock::succ_iterator SuI = MBB->succ_begin();
       BasicBlock *IfTrueP = FuncInfo->getOrCreateBasicBlock(*SuI);
@@ -445,17 +456,6 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       emitCondCode(IRB, IfTrueP, NextBB, CondVal);
     } else {
-      Node = CurDAG
-                 ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), Iftrue,
-                           getMDOperand(N))
-                 .getNode();
-
-      const MachineBasicBlock *LMBB = MI.getParent();
-      if (LMBB->succ_size() == 0) {
-        FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-        FuncInfo->setNodeReg(Node, ARM::R0);
-      }
-      NPI->Node = Node;
       // br label %xxx
       MachineBasicBlock *LMBBVal = FuncInfo->getMBB(BB);
       MachineBasicBlock::succ_iterator SuI = LMBBVal->succ_begin();
@@ -463,8 +463,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
         IRB.CreateBr(BrDest);
       } else {
-        Value *Inst = emitBRD(IRB, MI);
-        FuncInfo->setRealValue(Node, Inst);
+        Value *Inst = emitBRD(IRB, NPI);
         FuncInfo->recordDefinition(ARM::R0, Inst);
       }
     }
@@ -486,8 +485,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
       IRB.CreateBr(BrDest);
     } else {
-      Value *Inst = emitBRD(IRB, MI);
-      FuncInfo->setRealValue(Node, Inst);
+      Value *Inst = emitBRD(IRB, NPI);
       FuncInfo->recordDefinition(ARM::R0, Inst);
     }
   } break;
@@ -505,10 +503,6 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
-      NPI->Node = Node;
-      Value *FuncVal = FuncInfo->getOperand(MI, 0);
-      unsigned NumDests = Node->getNumOperands();
-      IRB.CreateIndirectBr(FuncVal, NumDests);
     } else {
       Node = CurDAG
                  ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
@@ -517,17 +511,17 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
-      NPI->Node = Node;
-      Value *Inst = emitBRD(IRB, MI);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->recordDefinition(ARM::R0, Inst);
     }
-  } break;
+    NPI->Node = Node;
+    emitBL(IRB, NPI);
+   } break;
   case ARM::BLX:
   case ARM::BLXi:
   case ARM::BLX_pred:
   case ARM::tBLXi:
   case ARM::tBLXr: {
+    // Exchange instruction set A32 <-> T32 and branch.
+    // For raising instruction set not important simply BL.
     // outs() << "WARNING: ARM::BLX Not yet implemented!\n";
     SDValue Func = N->getOperand(0);
 
@@ -540,10 +534,6 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
-      NPI->Node = Node;
-      Value *FuncVal = FuncInfo->getOperand(MI, 0);
-      unsigned NumDests = Node->getNumOperands();
-      IRB.CreateIndirectBr(FuncVal, NumDests);
     } else {
       Node = CurDAG
                  ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
@@ -552,11 +542,9 @@ void ARMMachineInstructionRaiser::emitInstr(
 
       FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
       FuncInfo->setNodeReg(Node, ARM::R0);
-      NPI->Node = Node;
-      Value *Inst = emitBRD(IRB, MI);
-      FuncInfo->setRealValue(Node, Inst);
-      FuncInfo->recordDefinition(ARM::R0, Inst);
     }
+    NPI->Node = Node;
+    emitBL(IRB, NPI);
   } break;
   case ARM::BR_JTr: {
     SDValue Rd = N->getOperand(0);
@@ -568,56 +556,7 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     NPI->Node = Node;
     // Emit the switch instruction.
-    if (JTList.size() > 0) {
-      MachineBasicBlock *Mbb = FuncInfo->getMBB(BB);
-      MachineFunction *MF = Mbb->getParent();
-
-      std::vector<JumpTableBlock> JTCases;
-      const MachineJumpTableInfo *MJT = MF->getJumpTableInfo();
-      unsigned JTIndex = Node->getConstantOperandVal(0);
-      std::vector<MachineJumpTableEntry> JumpTables = MJT->getJumpTables();
-      for (unsigned Idx = 0, MBBSz = JumpTables[JTIndex].MBBs.size(); Idx != MBBSz; ++Idx) {
-        llvm::Type *I32Type = llvm::IntegerType::getInt32Ty(Ctx);
-        llvm::ConstantInt *I32Val =
-            cast<ConstantInt>(llvm::ConstantInt::get(I32Type, Idx, true));
-        MachineBasicBlock *Succ = JumpTables[JTIndex].MBBs[Idx];
-        ConstantInt *CaseVal = I32Val;
-        JTCases.push_back(std::make_pair(CaseVal, Succ));
-      }
-      // main->getEntryBlock().setName("entry");
-
-      unsigned int NumCases = JTCases.size();
-      BasicBlock *DefBB =
-          FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].DefaultMBB);
-
-      BasicBlock *CondBB =
-          FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].ConditionMBB);
-
-      // condition instruction
-      Instruction *CondInst = nullptr;
-      for (BasicBlock::iterator DI = CondBB->begin(); DI != CondBB->end(); DI++) {
-        Instruction *Ins = dyn_cast<Instruction>(DI);
-        if (isa<LoadInst>(DI) && !CondInst) {
-          CondInst = Ins;
-        }
-
-        if (CondInst && (Ins->getOpcode() == Instruction::Sub)) {
-          if (isa<ConstantInt>(Ins->getOperand(1))) {
-            ConstantInt *IntOp = dyn_cast<ConstantInt>(Ins->getOperand(1));
-            if (IntOp->uge(0)) {
-              CondInst = Ins;
-            }
-          }
-        }
-      }
-
-      SwitchInst *Inst = IRB.CreateSwitch(CondInst, DefBB, NumCases);
-      for (unsigned Idx = 0, Cnt = NumCases; Idx != Cnt; ++Idx) {
-        BasicBlock *CaseBB =
-            FuncInfo->getOrCreateBasicBlock(JTCases[Idx].second);
-        Inst->addCase(JTCases[Idx].first, CaseBB);
-      }
-    }
+    emitSwitchInstr(IRB, NPI, BB);
   } break;
   case ARM::BX:
   case ARM::BX_CALL:
@@ -634,8 +573,9 @@ void ARMMachineInstructionRaiser::emitInstr(
                .getNode();
 
     NPI->Node = Node;
+    // Get exactly first argument.
     Value *FuncVal = FuncInfo->getOperand(MI, 0);
-    unsigned NumDests = Node->getNumOperands();
+    unsigned NumDests = MI.getNumOperands(); // Node->getNumOperands();
     IRB.CreateIndirectBr(FuncVal, NumDests);
   } break;
   case ARM::BX_RET:
@@ -921,7 +861,10 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     FuncInfo->recordDefinition(Rd.getNode(), Node);
     NPI->Node = Node;
-
+    Value *S0 = FuncInfo->getOperand(NPI, 0);
+    Value *S1 = FuncInfo->getOperand(NPI, 1);
+    Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
+    FuncInfo->recordDefinition(NPI, Inst);
   } break;
   /* LSL */
   case ARM::LSLi:

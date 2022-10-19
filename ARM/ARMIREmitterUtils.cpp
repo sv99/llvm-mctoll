@@ -432,49 +432,6 @@ void ARMMachineInstructionRaiser::emitBinaryCPSRXor(
   /* How to deal with C Flag? */
 }
 
-#define HANDLE_BINARY_FUNC1(OPCODE)                                             \
-  auto *BB = IRB.GetInsertBlock();                                             \
-  Value *Result = nullptr;                                                     \
-  if (NPI->HasCPSR) {                                                          \
-    unsigned CondValue = NPI->Cond;                                            \
-    if (!(NPI->UpdateCPSR)) {                                                  \
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());         \
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());       \
-                                                                               \
-      emitCondCode(IRB, IfBB, ElseBB, CondValue);                               \
-                                                                               \
-      Value *Inst = BinaryOperator::Create##OPCODE(S0, S1);                    \
-      IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));              \
-      Result = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,                \
-                                    dyn_cast<Instruction>(Inst));        \
-      IRB.SetInsertPoint(IfBB);                                                \
-      IRB.CreateBr(ElseBB);                                                    \
-      IRB.SetInsertPoint(ElseBB);                                              \
-    } else if (NPI->Special) {                                                 \
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());         \
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());       \
-                                                                               \
-      emitCondCode(IRB, IfBB, ElseBB, CondValue);                               \
-                                                                               \
-      Value *Inst = BinaryOperator::Create##OPCODE(S0, S1);                    \
-      IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));              \
-      Result = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,                \
-                                    dyn_cast<Instruction>(Inst));        \
-      IRB.SetInsertPoint(IfBB);                                                \
-      emitBinaryCPSR##OPCODE(IRB, *NPI->MI, Inst);                            \
-      IRB.CreateBr(ElseBB);                                                    \
-      IRB.SetInsertPoint(ElseBB);                                              \
-    } else {                                                                   \
-      Result = IRB.Create##OPCODE(S0, S1);                                     \
-      emitBinaryCPSR##OPCODE(IRB, *NPI->MI, Result);                            \
-    }                                                                          \
-  } else {                                                                     \
-    Result = BinaryOperator::Create##OPCODE(S0, S1);                           \
-    BasicBlock *CBB = IRB.GetInsertBlock();                                    \
-    CBB->getInstList().push_back(dyn_cast<Instruction>(Result));                 \
-  }                                                                            \
-  return Result;
-
 #define HANDLE_BINARY_FUNC(OPCODE)                                             \
   checkConditionBegin(IRB, NPI);                                               \
   Value *Result = IRB.Insert(BinaryOperator::Create##OPCODE(S0, S1));          \
@@ -595,32 +552,27 @@ Value *ARMMachineInstructionRaiser::emitADC(
 }
 
 Value *ARMMachineInstructionRaiser::emitLoad(
-    IRBuilder<> &IRB, const MachineInstr &MI) {
-  auto *NPI = FuncInfo->getNPI(MI);
-  auto *Node = NPI->Node;
+    IRBuilder<> &IRB, NodePropertyInfo *NPI) {
   Value *Result = nullptr;
-  //unsigned Opc = Node->getOpcode();
   auto *BB = IRB.GetInsertBlock();
   auto *DLT = &M->getDataLayout();
-  IRB.SetCurrentDebugLocation(MI.getDebugLoc());
+  IRB.SetCurrentDebugLocation(NPI->MI->getDebugLoc());
 
-  Value *S = FuncInfo->getIRValue(Node->getOperand(0));
+  Value *S = FuncInfo->getOperand(NPI, 0);
   Value *Ptr = nullptr;
   if (S->getType()->isPointerTy())
     Ptr = S;
   else
     Ptr = IRB.CreateIntToPtr(S, S->getType()->getPointerTo());
-    // Node->getValueType(0).getTypeForEVT(Ctx)->getPointerTo());
 
   if (NPI->HasCPSR) {
-    unsigned CondValue = NPI->Cond;
     // Create new BB for EQ instruction execute.
     BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
     // Create new BB to update the DAG BB.
     BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
     // Emit the condition code.
-    emitCondCode(IRB, IfBB, ElseBB, CondValue);
+    emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
     IRB.SetInsertPoint(IfBB);
     Value *Inst = nullptr;
     if (GlobalVariable::classof(Ptr))
@@ -667,10 +619,8 @@ Value *ARMMachineInstructionRaiser::emitLoad(
 }
 
 void ARMMachineInstructionRaiser::emitStore(
-    IRBuilder<> &IRB, const MachineInstr &MI) {
-  auto *NPI = FuncInfo->getNPI(MI);
-  auto *Node = NPI->Node;
-  //unsigned Opc = Node->getOpcode();
+    IRBuilder<> &IRB, NodePropertyInfo *NPI) {
+  auto &MI = *NPI->MI;
   auto *BB = IRB.GetInsertBlock();
   auto *DLT = &M->getDataLayout();
   IRB.SetCurrentDebugLocation(MI.getDebugLoc());
@@ -678,7 +628,7 @@ void ARMMachineInstructionRaiser::emitStore(
   Value *Val = FuncInfo->getOperand(MI, 0);
   Value *S = FuncInfo->getOperand(MI, 1);
   Value *Ptr = nullptr;
-  Type *Nty = Node->getValueType(0).getTypeForEVT(Ctx);
+  Type *Nty = Val->getType();
 
   if (Val->getType() != Nty) {
     Val = IRB.CreateTrunc(Val, Nty);
@@ -715,16 +665,84 @@ void ARMMachineInstructionRaiser::emitStore(
   }
 }
 
+void ARMMachineInstructionRaiser::emitBL(
+    IRBuilder<> &IRB, NodePropertyInfo *NPI) {
+  auto &MI = *NPI->MI;
+  if (MI.getOperand(0).isReg()) {
+    Value *FuncVal = FuncInfo->getOperand(MI, 0);
+    unsigned NumDests = MI.getNumOperands(); //Node->getNumOperands();
+    IRB.CreateIndirectBr(FuncVal, NumDests);
+  } else {
+    Value *Inst = emitBRD(IRB, NPI);
+    FuncInfo->recordDefinition(ARM::R0, Inst);
+  }
+}
+
+void ARMMachineInstructionRaiser::emitSwitchInstr(
+    IRBuilder<> &IRB, NodePropertyInfo *NPI, BasicBlock *BB) {
+  // Emit the switch instruction.
+  if (JTList.size() > 0) {
+    MachineBasicBlock *Mbb = FuncInfo->getMBB(BB);
+    MachineFunction *MF = Mbb->getParent();
+
+    std::vector<JumpTableBlock> JTCases;
+    const MachineJumpTableInfo *MJT = MF->getJumpTableInfo();
+    Value *S0 = FuncInfo->getOperand(*NPI->MI, 0);
+    unsigned JTIndex = dyn_cast<ConstantInt>(S0)->getZExtValue(); // NPI->Node->getConstantOperandVal(0);
+    std::vector<MachineJumpTableEntry> JumpTables = MJT->getJumpTables();
+    for (unsigned Idx = 0, MBBSz = JumpTables[JTIndex].MBBs.size(); Idx != MBBSz; ++Idx) {
+      llvm::Type *I32Type = llvm::IntegerType::getInt32Ty(Ctx);
+      llvm::ConstantInt *I32Val =
+          cast<ConstantInt>(llvm::ConstantInt::get(I32Type, Idx, true));
+      MachineBasicBlock *Succ = JumpTables[JTIndex].MBBs[Idx];
+      ConstantInt *CaseVal = I32Val;
+      JTCases.push_back(std::make_pair(CaseVal, Succ));
+    }
+    // main->getEntryBlock().setName("entry");
+
+    unsigned int NumCases = JTCases.size();
+    BasicBlock *DefBB =
+        FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].DefaultMBB);
+
+    BasicBlock *CondBB =
+        FuncInfo->getOrCreateBasicBlock(JTList[JTIndex].ConditionMBB);
+
+    // condition instruction
+    Instruction *CondInst = nullptr;
+    for (BasicBlock::iterator DI = CondBB->begin(); DI != CondBB->end(); DI++) {
+      Instruction *Ins = dyn_cast<Instruction>(DI);
+      if (isa<LoadInst>(DI) && !CondInst) {
+        CondInst = Ins;
+      }
+
+      if (CondInst && (Ins->getOpcode() == Instruction::Sub)) {
+        if (isa<ConstantInt>(Ins->getOperand(1))) {
+          ConstantInt *IntOp = dyn_cast<ConstantInt>(Ins->getOperand(1));
+          if (IntOp->uge(0)) {
+            CondInst = Ins;
+          }
+        }
+      }
+    }
+
+    SwitchInst *Inst = IRB.CreateSwitch(CondInst, DefBB, NumCases);
+    for (unsigned Idx = 0, Cnt = NumCases; Idx != Cnt; ++Idx) {
+      BasicBlock *CaseBB =
+          FuncInfo->getOrCreateBasicBlock(JTCases[Idx].second);
+      Inst->addCase(JTCases[Idx].first, CaseBB);
+    }
+  }
+}
+
 Value *ARMMachineInstructionRaiser::emitBRD(
-    IRBuilder<> &IRB, const MachineInstr &MI) {
-  auto *NPI = FuncInfo->getNPI(MI);
-  auto *Node = NPI->Node;
+    IRBuilder<> &IRB, NodePropertyInfo *NPI) {
   auto *BB = IRB.GetInsertBlock();
   auto *DLT = &M->getDataLayout();
-  IRB.SetCurrentDebugLocation(MI.getDebugLoc());
+  IRB.SetCurrentDebugLocation(NPI->MI->getDebugLoc());
 
   // Get the function call Index.
-  uint64_t Index = Node->getConstantOperandVal(0);
+  Value *S0 = FuncInfo->getOperand(*NPI->MI, 0);
+  uint64_t Index = dyn_cast<ConstantInt>(S0)->getZExtValue(); // NPI->Node->getConstantOperandVal(0);
   // Get function from ModuleRaiser.
   Function *CallFunc = MR->getRaisedFunctionAt(Index);
   unsigned IFFuncArgNum = 0; // The argument number which gets from analyzing
@@ -734,7 +752,7 @@ Value *ARMMachineInstructionRaiser::emitBRD(
     // According to MI to get BL instruction address.
     // uint64_t callAddr = FuncInfo->getNPI(MI)->InstAddr;
     uint64_t CallAddr = MR->getTextSectionAddress() +
-                        getMCInstIndex(MI);
+                        getMCInstIndex(*NPI->MI);
     auto *ArmMR =
         const_cast<ARMModuleRaiser *>(dyn_cast<ARMModuleRaiser>(MR));
     Function *IndefiniteFunc = ArmMR->getCallFunc(CallAddr);

@@ -132,30 +132,37 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
   Value *Operand = nullptr;
   if (MO.isReg() && !MO.isDebug()) {
     auto Reg = MO.getReg();
-    if (ArgValMap.count(Reg) == 0) {
-      // first use register
-      if (Reg > ARM::NUM_TARGET_REGS) {
-        // Virtual register used in the splitted MI.
-        Operand = ConstantInt::get(DefaultType, 0);
-      } else {
-        assert(false &&
-               "Cannot find value for the corresponding register!");
-      }
-    } else {
+//    if (ArgValMap.count(Reg) == 0) {
+//      // first use register
+//      if (Reg > ARM::NUM_TARGET_REGS) {
+//        // Virtual register used in the splitted MI.
+//        Operand = ConstantInt::get(DefaultType, 0);
+//      } else {
+//        assert(false &&
+//               "Cannot find value for the corresponding register!");
+//      }
+//    } else {
+//      Operand = ArgValMap[Reg];
+//    }
+    if (checkArgValue(Reg)) {
       Operand = ArgValMap[Reg];
+    } else {
+      //      assert(ArgValMap.count(Reg) != 0 &&
+      //             "Cannot find value for the corresponding register!");
+      // TODO operand not exists
+      Operand = ConstantInt::get(getDefaultType(), 0);
     }
   } else if (MO.isImm()) {
     Operand = ConstantInt::get(getDefaultType(), MO.getImm());
    } else if (MO.isFI()) {
     // Frame index
     int FI = MO.getIndex();
+    const MachineFrameInfo &MFI = MI.getMF()->getFrameInfo();
     if (isStackIndex(FI)) {
-      const MachineFrameInfo &MFI = MI.getMF()->getFrameInfo();
       Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
     } else if (isArgumentIndex(FI)) {
       Operand = const_cast<Argument *>(getRaisedFunction()->arg_begin() + (FI - 1));
     } else if (isReturnIndex(FI)) {
-      const MachineFrameInfo &MFI = MI.getMF()->getFrameInfo();
       Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(0));
     } else {
       // Do nothing for now.
@@ -172,48 +179,11 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
   return Operand;
 }
 
-Value *FunctionRaisingInfo::getOperand(NodePropertyInfo *NPI, unsigned Num,
-                                       bool Exact) {
-  if (!Exact && (!NPI->IsTwoAddress) && (Num < 2)) {
+Value *FunctionRaisingInfo::getOperand(NodePropertyInfo *NPI, unsigned Num) {
+  if ((!NPI->IsTwoAddress) && (Num < 2)) {
     Num++;
   }
-  const MachineOperand &MO = NPI->MI->getOperand(Num);
-  Value *Operand = nullptr;
-  if (MO.isReg() && !MO.isDebug()) {
-    auto Reg = MO.getReg();
-    if (checkArgValue(Reg)) {
-      Operand = ArgValMap[Reg];
-    } else {
-      //      assert(ArgValMap.count(Reg) != 0 &&
-      //             "Cannot find value for the corresponding register!");
-      // TODO operand not exists
-      Operand = ConstantInt::get(getDefaultType(), 0);
-    }
-  } else if (MO.isImm()) {
-    Operand = ConstantInt::get(getDefaultType(), MO.getImm());
-  } else if (MO.isFI()) {
-    // Frame index
-    int FI = MO.getIndex();
-    const MachineFrameInfo &MFI = NPI->MI->getMF()->getFrameInfo();
-    if (isStackIndex(FI)) {
-      Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
-    } else if (isArgumentIndex(FI)) {
-      Operand = const_cast<Argument *>(getRaisedFunction()->arg_begin() + (FI - 1));
-    } else if (isReturnIndex(FI)) {
-      Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(0));
-    } else {
-      // Do nothing for now.
-    }
-  } else if (MO.isJTI()) {
-    // Jump table index
-    Operand = ConstantInt::get(getDefaultType(), MO.getIndex());
-  } else if (MO.isSymbol()) {
-    Operand = MR->getModule()->getNamedGlobal(MO.getSymbolName());
-  } else {
-    dbgs() << "Warning: visit. An unmatch type! = "
-           << (unsigned)(MO.getType()) << "\n";
-  }
-  return Operand;
+  return getOperand(*NPI->MI, Num);
 }
 
 NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {

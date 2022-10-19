@@ -154,8 +154,9 @@ public:
   void setRegisterValue(Register Reg, Value *V);
   /// Get IR value for the MI operand.
   Value *getOperand(const MachineInstr &MI, unsigned Num);
-  Value *getOperand(NodePropertyInfo *NPI, unsigned Num,
-                    bool Exact = false);
+  /// Get IR value for the NPI operand corrected by IsTwoAddress.
+  /// Internally call getOperand for MI.
+  Value *getOperand(NodePropertyInfo *NPI, unsigned Num);
   /// Get IR value for the SDValue operand.
   Value *getIRValue(SDValue Val);
 
