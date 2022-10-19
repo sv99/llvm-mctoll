@@ -49,6 +49,14 @@ public:
 
   std::vector<JumpTableInfo> JTList;
 
+  Module *getModule() { return MR->getModule(); }
+  const DataLayout &getDataLayout() { return MR->getModule()->getDataLayout(); }
+
+  /// Get default Int type.
+  Type *getDefaultType() {
+    return Type::getIntNTy(
+        Ctx, getDataLayout().getPointerSizeInBits());
+  };
 private:
   // Commonly used LLVM data structures during this phase
   MachineRegisterInfo &MachineRegInfo;
@@ -56,7 +64,6 @@ private:
   const ARMBaseInstrInfo *InstrInfo;
   const ARMBaseRegisterInfo *RegisterInfo;
   ARMModuleRaiser *TargetMR;
-  Module *M;
   LLVMContext &Ctx;
   /// The function raising state storage.
   FunctionRaisingInfo *FuncInfo;
@@ -66,10 +73,6 @@ private:
 
   /// Discover machine function prototype.
   Function *discoverPrototype(MachineFunction &MF);
-  /// Get default Int type.
-  Type *getDefaultType() {
-    return Type::getIntNTy(Ctx, M->getDataLayout().getPointerSizeInBits());
-  };
   /// Check the first reference of the reg is USE.
   bool isUsedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
   /// Check the first reference of the reg is DEF.
@@ -189,15 +192,6 @@ private:
   bool doSelection();
   void initEntryBasicBlock();
   void selectBasicBlock(MachineBasicBlock *MBB);
-  void dumpDAG(SelectionDAG *CurDAG);
-
-  // Functions from removed DAG folder
-
-  /// Gets the Metadata of given SDNode.
-  SDValue getMDOperand(SDNode *N);
-
-  /// visit - create SDNodes from MI.
-  SDNode *visit(const MachineInstr &MI);
 
   // IR emitter functions
 

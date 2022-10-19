@@ -21,21 +21,6 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-/// Gets the Metadata of given SDNode.
-SDValue ARMMachineInstructionRaiser::getMDOperand(SDNode *N) {
-  for (auto &Sdv : N->ops()) {
-    if (MDNodeSDNode::classof(Sdv.getNode())) {
-      return Sdv.get();
-    }
-  }
-  assert(false && "Should not run at here!");
-  return SDValue();
-}
-
-EVT getDefaultEVT(FunctionRaisingInfo *FuncInfo) {
-  return EVT::getEVT(FuncInfo->getDefaultType());
-}
-
 #define HANDLE_EMIT_CONDCODE_COMMON(OPC)                                       \
   BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());             \
   BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());           \
@@ -60,14 +45,14 @@ void ARMMachineInstructionRaiser::emitInstr(
 
   NodePropertyInfo *NPI = FuncInfo->initNPI(MI);
   auto *BB = IRB.GetInsertBlock();
-  auto *N = visit(MI);
-  auto *CurDAG = &FuncInfo->getCurDAG();
-  SDLoc Dl(N);
-  SDNode *Node = nullptr;
 
   switch (MI.getOpcode()) {
-  default:
-    break;
+  default: {
+    // Print names for all unimplemented instructions.
+    auto *TII = getMF().getSubtarget().getInstrInfo();
+    outs() << "WARNING: ARM::" << TII->getName(MI.getOpcode())
+           << " Not yet implemented!\n";
+  } break;
   /* ADC */
   case ARM::ADCrr:
   case ARM::ADCri:
@@ -77,34 +62,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ADCrr:
   case ARM::t2ADCri:
   case ARM::t2ADCrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-    if (NPI->IsTwoAddress) {
-      // ADCS <Rdn>,<Rm>
-      // ADC<c> <Rdn>,<Rm>
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::ADDC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      // ADC{S}<c> <Rd>,<Rn>,<Rm>
-      // ADC{S}<c> <Rd>,<Rn>,#<const>
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::ADDC, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value * InstADC = emitADC(IRB, NPI);
     FuncInfo->recordDefinition(NPI, InstADC);
   } break;
@@ -129,48 +86,6 @@ void ARMMachineInstructionRaiser::emitInstr(
     // 1. Check out MI is two-address or three-address
     // 2. Do with the displacement operation.(not yet implement.)
     // Judge the MI address module, then check out whether has the imm.
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-    // <opcode>   {<cond>}{s}<Rd>，<Rn>{，<OP2>}
-    if (FrameIndexSDNode::classof(N->getOperand(1).getNode())) {
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::LOAD, Dl, getDefaultEVT(FuncInfo), Rn,
-                           getMDOperand(N))
-                 .getNode();
-
-      FuncInfo->recordDefinition(Rd.getNode(), Node);
-      NPI->Node = Node;
-//      Value *LoadInst = emitLoad(IRB, MI);
-//      FuncInfo->recordDefinition(NPI, LoadInst);
-    } else {
-      if (NPI->IsTwoAddress) {
-        if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-          Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-        SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-        Node = CurDAG
-                   ->getNode(ISD::ADD, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                             getMDOperand(N))
-                   .getNode();
-      } else {
-        SDValue Op2 = N->getOperand(2);
-        if (RegisterSDNode::classof(Op2.getNode()))
-          Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-        Node = CurDAG
-                   ->getNode(ISD::ADD, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                             getMDOperand(N))
-                   .getNode();
-      }
-
-      FuncInfo->recordDefinition(Rd.getNode(), Node);
-      NPI->Node = Node;
-//      Value *S0 = FuncInfo->getOperand(NPI, 0);
-//      Value *S1 = FuncInfo->getOperand(NPI, 1);
-//      Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
-//      FuncInfo->recordDefinition(NPI, Inst);
-    }
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
@@ -190,30 +105,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2SUBrr:
   case ARM::t2SUBrs:
   case ARM::t2SUBS_PC_LR: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::SUB, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::SUB, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinarySub(IRB, NPI, S0, S1);
@@ -233,18 +124,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::MOVTi16:
   case ARM::MOVi: {
     // Dispalcement operation need do.
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-    if (RegisterSDNode::classof(Rn.getNode()))
-      Rn = FuncInfo->getSDValueByRegister(Rn);
-
-    Node = CurDAG
-               ->getNode(ARMISD::CMOV, Dl, getDefaultEVT(FuncInfo), Rn,
-                         CurDAG->getConstant(0, Dl, getDefaultEVT(FuncInfo)))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     // Get exactly second operand.
     Value *S1 = FuncInfo->getOperand(*NPI->MI, 1);
     Value *Inst = emitBinaryAdd(IRB, NPI, S1, IRB.getInt32(0));
@@ -265,51 +144,36 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::STR_PRE_REG:
   case ARM::STR_POST_IMM:
   case ARM::STR_POST_REG: {
-    SDValue Val = N->getOperand(0);
-    SDValue Ptr = N->getOperand(1); // This is a pointer.
-
-    if (RegisterSDNode::classof(Val.getNode()))
-      Val = FuncInfo->getSDValueByRegister(Val);
-
-    if (RegisterSDNode::classof(Ptr.getNode()))
-      Ptr = FuncInfo->getSDValueByRegister(Ptr);
-
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::STORE, Dl, getDefaultEVT(FuncInfo), Val,
-                         Ptr, getMDOperand(N))
-               .getNode();
-
-    NPI->Node = Node;
     emitStore(IRB, NPI);
   } break;
   case ARM::STRH:
   case ARM::STRH_PRE:
   case ARM::STRH_POST: {
-    EVT InstTy = EVT::getEVT(Type::getInt16Ty(*CurDAG->getContext()));
-    SDValue Val = N->getOperand(0);
-    SDValue Op1 = N->getOperand(1);
-
-    if (RegisterSDNode::classof(Val.getNode()))
-      Val = FuncInfo->getSDValueByRegister(Val);
-
-    if (RegisterSDNode::classof(Op1.getNode()))
-      Op1 = FuncInfo->getSDValueByRegister(Op1);
-
-    if (N->getNumOperands() < 5) {
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-
-    NPI->Node = Node;
+//    EVT InstTy = EVT::getEVT(Type::getInt16Ty(*CurDAG->getContext()));
+//    SDValue Val = N->getOperand(0);
+//    SDValue Op1 = N->getOperand(1);
+//
+//    if (RegisterSDNode::classof(Val.getNode()))
+//      Val = FuncInfo->getSDValueByRegister(Val);
+//
+//    if (RegisterSDNode::classof(Op1.getNode()))
+//      Op1 = FuncInfo->getSDValueByRegister(Op1);
+//
+//    if (N->getNumOperands() < 5) {
+//      Node = CurDAG
+//                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1,
+//                           getMDOperand(N))
+//                 .getNode();
+//    } else {
+//      SDValue Op2 = N->getOperand(2);
+//      Op2 = FuncInfo->getSDValueByRegister(Op2);
+//      Node = CurDAG
+//                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
+//                           getMDOperand(N))
+//                 .getNode();
+//    }
+//
+//    NPI->Node = Node;
     emitStore(IRB, NPI);
   } break;
   case ARM::STRBi12:
@@ -318,31 +182,31 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::STRB_PRE_REG:
   case ARM::STRB_POST_IMM:
   case ARM::STRB_POST_REG: {
-    EVT InstTy = EVT::getEVT(Type::getInt8Ty(*CurDAG->getContext()));
-    SDValue Val = N->getOperand(0);
-    SDValue Op1 = N->getOperand(1);
-
-    if (RegisterSDNode::classof(Val.getNode()))
-      Val = FuncInfo->getSDValueByRegister(Val);
-
-    if (RegisterSDNode::classof(Op1.getNode()))
-      Op1 = FuncInfo->getSDValueByRegister(Op1);
-
-    if (N->getNumOperands() < 5) {
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-
-    NPI->Node = Node;
+//    EVT InstTy = EVT::getEVT(Type::getInt8Ty(*CurDAG->getContext()));
+//    SDValue Val = N->getOperand(0);
+//    SDValue Op1 = N->getOperand(1);
+//
+//    if (RegisterSDNode::classof(Val.getNode()))
+//      Val = FuncInfo->getSDValueByRegister(Val);
+//
+//    if (RegisterSDNode::classof(Op1.getNode()))
+//      Op1 = FuncInfo->getSDValueByRegister(Op1);
+//
+//    if (N->getNumOperands() < 5) {
+//      Node = CurDAG
+//                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1,
+//                           getMDOperand(N))
+//                 .getNode();
+//    } else {
+//      SDValue Op2 = N->getOperand(2);
+//      Op2 = FuncInfo->getSDValueByRegister(Op2);
+//      Node = CurDAG
+//                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
+//                           getMDOperand(N))
+//                 .getNode();
+//    }
+//
+//    NPI->Node = Node;
     emitStore(IRB, NPI);
   } break;
   /* LDR */
@@ -355,18 +219,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::LDR_PRE_REG:
   case ARM::LDR_POST_IMM:
   case ARM::LDR_POST_REG: {
-    EVT InstTy = EVT::getEVT(Type::getInt32Ty(*CurDAG->getContext()));
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(Rn.getNode()))
-      Rn = FuncInfo->getSDValueByRegister(Rn);
-
-    Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
@@ -378,18 +230,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2LDRH_POST:
   case ARM::LDRSH_PRE:
   case ARM::LDRSH_POST: {
-    EVT InstTy = EVT::getEVT(Type::getInt16Ty(*CurDAG->getContext()));
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(Rn.getNode()))
-      Rn = FuncInfo->getSDValueByRegister(Rn);
-
-    Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
@@ -405,18 +245,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::LDRB_POST_IMM:
   case ARM::LDRB_PRE_REG:
   case ARM::LDRB_POST_REG: {
-    EVT InstTy = EVT::getEVT(Type::getInt8Ty(*CurDAG->getContext()));
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(Rn.getNode()))
-      Rn = FuncInfo->getSDValueByRegister(Rn);
-
-    Node = CurDAG->getNode(EXT_ARMISD::LOAD, Dl, InstTy, Rn, getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *LoadInst = emitLoad(IRB, NPI);
     FuncInfo->recordDefinition(NPI, LoadInst);
   } break;
@@ -424,26 +252,12 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::Bcc:
   case ARM::tBcc:
   case ARM::t2Bcc: {
-    SDValue Iftrue = N->getOperand(0);
-    SDValue Cond = N->getOperand(1);
-
-    if (NPI->HasCPSR) {
-      Node = CurDAG
-                 ->getNode(ISD::BRCOND, Dl, getDefaultEVT(FuncInfo), Iftrue,
-                           Cond, getMDOperand(N))
-                 .getNode();
-    } else {
-      Node = CurDAG
-                 ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), Iftrue,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    const MachineBasicBlock *LMBB = MI.getParent();
-    if (LMBB->succ_size() == 0) {
-      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-      FuncInfo->setNodeReg(Node, ARM::R0);
-    }
-    NPI->Node = Node;
+//    const MachineBasicBlock *LMBB = MI.getParent();
+//    if (LMBB->succ_size() == 0) {
+//      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
+//      FuncInfo->setNodeReg(Node, ARM::R0);
+//    }
+//    NPI->Node = Node;
     // emit
     if (NPI->HasCPSR) {
       // br i1 %cmp, label %if.then, label %if.else
@@ -471,13 +285,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::B:
   case ARM::tB:
   case ARM::t2B: {
-    SDValue BrBlock = N->getOperand(0);
-    Node = CurDAG
-               ->getNode(ISD::BR, Dl, getDefaultEVT(FuncInfo), BrBlock,
-                         getMDOperand(N))
-               .getNode();
-
-    NPI->Node = Node;
     // br label %xxx
     MachineBasicBlock *LMBBVal = FuncInfo->getMBB(BB);
     MachineBasicBlock::succ_iterator SuI = LMBBVal->succ_begin();
@@ -492,27 +299,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::BL:
   case ARM::BL_pred:
   case ARM::tBL: {
-    SDValue Func = N->getOperand(0);
-
-    if (RegisterSDNode::classof(Func.getNode())) {
-      Func = FuncInfo->getSDValueByRegister(Func);
-      Node = CurDAG
-                 ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), Func,
-                           getMDOperand(N))
-                 .getNode();
-
-      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-      FuncInfo->setNodeReg(Node, ARM::R0);
-    } else {
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
-                           getMDOperand(N))
-                 .getNode();
-
-      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-      FuncInfo->setNodeReg(Node, ARM::R0);
-    }
-    NPI->Node = Node;
     emitBL(IRB, NPI);
    } break;
   case ARM::BLX:
@@ -522,40 +308,9 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tBLXr: {
     // Exchange instruction set A32 <-> T32 and branch.
     // For raising instruction set not important simply BL.
-    // outs() << "WARNING: ARM::BLX Not yet implemented!\n";
-    SDValue Func = N->getOperand(0);
-
-    if (RegisterSDNode::classof(Func.getNode())) {
-      Func = FuncInfo->getSDValueByRegister(Func);
-      Node = CurDAG
-                 ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), Func,
-                           getMDOperand(N))
-                 .getNode();
-
-      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-      FuncInfo->setNodeReg(Node, ARM::R0);
-    } else {
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::BRD, Dl, getDefaultEVT(FuncInfo), Func,
-                           getMDOperand(N))
-                 .getNode();
-
-      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-      FuncInfo->setNodeReg(Node, ARM::R0);
-    }
-    NPI->Node = Node;
     emitBL(IRB, NPI);
   } break;
   case ARM::BR_JTr: {
-    SDValue Rd = N->getOperand(0);
-
-    Node = CurDAG
-               ->getNode(ISD::BR_JT, Dl, getDefaultEVT(FuncInfo), Rd,
-                         getMDOperand(N))
-               .getNode();
-
-    NPI->Node = Node;
-    // Emit the switch instruction.
     emitSwitchInstr(IRB, NPI, BB);
   } break;
   case ARM::BX:
@@ -563,16 +318,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::BX_pred:
   case ARM::tBX:
   case ARM::tBX_CALL: {
-    SDValue CallReg = N->getOperand(0);
-    if (RegisterSDNode::classof(CallReg.getNode()))
-      CallReg = FuncInfo->getSDValueByRegister(CallReg);
-
-    Node = CurDAG
-               ->getNode(ISD::BRIND, Dl, getDefaultEVT(FuncInfo), CallReg,
-                         getMDOperand(N))
-               .getNode();
-
-    NPI->Node = Node;
     // Get exactly first argument.
     Value *FuncVal = FuncInfo->getOperand(MI, 0);
     unsigned NumDests = MI.getNumOperands(); // Node->getNumOperands();
@@ -590,21 +335,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tCMPi8:
   case ARM::t2CMPrr:
   case ARM::tCMPr: {
-    SDValue Cmpl = N->getOperand(0);
-    SDValue Cmph = N->getOperand(1);
-    if (RegisterSDNode::classof(Cmph.getNode()))
-      Cmph = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    Cmpl = FuncInfo->getSDValueByRegister(Cmpl);
-
-    // Create condition SDValuleR
-    // TODO: It should be verified why this type node can not be added Metadata
-    // Operand.
-    Node = CurDAG
-               ->getNode(ISD::SETCC, Dl, getDefaultEVT(FuncInfo), Cmpl, Cmph
-                         /* , getMDOperand(N) */)
-               .getNode();
-
-    NPI->Node = Node;
     // set flags by result <Op1> - <Op2>
     // SBBS without store result
     Value *S0 = FuncInfo->getOperand(NPI, 0);
@@ -620,34 +350,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ANDri:
   case ARM::t2ANDrr:
   case ARM::t2ANDrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      // AND<c> <Rdn>,<Rm>
-      // ANDS <Rdn>,<Rm>
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::AND, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      // AND{S}<c> <Rd>,<Rn>,#<const>
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::AND, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryAnd(IRB, NPI, S0, S1);
@@ -664,32 +366,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tASRri:
   case ARM::t2ASRrr:
   case ARM::t2ASRri: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::SRA, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::SRA, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryAShr(IRB, NPI, S0, S1);
@@ -702,19 +378,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2CMNri:
   case ARM::t2CMNzrr:
   case ARM::t2CMNzrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    Rd = FuncInfo->getSDValueByRegister(Rd);
-    Node = CurDAG
-               ->getNode(ARMISD::CMN, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                         getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
     emitCMN(IRB, S0, S1);
@@ -728,33 +391,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2EORrr:
   case ARM::t2EORrs:
   case ARM::t2EORri: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      // EORS <Rdn>,<Rm>
-      // EOR<c> <Rdn>,<Rm>
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      // EOR{S}<c> <Rd>,<Rn>,#<const>
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
@@ -772,24 +408,14 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2MSR_AR:
   case ARM::t2MSRbanked: {
     // Update the CPSR.
-    SDValue Cond = N->getOperand(1);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Cond = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::MSR, Dl, getDefaultEVT(FuncInfo), Cond,
-                         getMDOperand(N))
-               .getNode();
-
-    NPI->Node = Node;
     Value *CondVal = FuncInfo->getOperand(MI, 0);
     // 1 1 1 1
     // N set 1 0 0 0   8
     // Z set 0 1 0 0   4
     // C set 0 0 1 0   2
     // Z set 0 0 0 1   1
-    IRB.CreateStore(CondVal, dyn_cast<Value>(M->getGlobalVariable("Reserved")));
+    IRB.CreateStore(CondVal, dyn_cast<Value>(
+                                 getModule()->getGlobalVariable("Reserved")));
     // Pattern msr CPSR_f, Rn
     if (1) {
       Value *ShiftNum = IRB.getInt32(28);
@@ -821,19 +447,6 @@ void ARMMachineInstructionRaiser::emitInstr(
     /* MULS <Rd>, <Rn>, <Rm> */
     /* MUL<c> <Rd>, <Rn>, <Rm> */
     /* MUL{S}<c> <Rd>, <Rn>, <Rm> */
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    SDValue Op2 = N->getOperand(2);
-    Op2 = FuncInfo->getSDValueByRegister(Op2);
-    Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    Node = CurDAG
-               ->getNode(ISD::MUL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                         getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryMul(IRB, NPI, S0, S1);
@@ -848,19 +461,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2MVNi:
   case ARM::t2MVNr:
   case ARM::t2MVNs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Node = CurDAG
-               ->getNode(ISD::XOR, Dl, getDefaultEVT(FuncInfo), Rn,
-                         CurDAG->getConstant(-1, Dl, getDefaultEVT(FuncInfo)))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
@@ -873,31 +473,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tLSLrr:
   case ARM::t2LSLri:
   case ARM::t2LSLrr: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::SHL, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::SHL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryShl(IRB, NPI, S0, S1);
@@ -910,30 +485,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tLSRrr:
   case ARM::t2LSRri:
   case ARM::t2LSRrr: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::SRL, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::SRL, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryLShr(IRB, NPI, S0, S1);
@@ -948,32 +499,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ORRri:
   case ARM::t2ORRrr:
   case ARM::t2ORRrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    // <opcode>   {<cond>}{s}<Rd>，<Rn>{，<OP2>}
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::OR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::OR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(NPI, 0);
     Value *S1 = FuncInfo->getOperand(NPI, 1);
     Value *Inst = emitBinaryOr(IRB, NPI, S0, S1);
@@ -985,30 +510,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tROR:
   case ARM::t2RORri:
   case ARM::t2RORrr: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(ISD::ROTR, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(ISD::ROTR, Dl, getDefaultEVT(FuncInfo), Rn, Op2,
-                           getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
@@ -1052,16 +553,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   } break;
   /* RRX */
   case ARM::RRX: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Node = CurDAG
-               ->getNode(ARMISD::RRX, Dl, getDefaultEVT(FuncInfo), Rn,
-                         getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Type *Ty = getDefaultType();
     Value *Val1 = ConstantInt::get(Ty, 1, true);
@@ -1121,29 +612,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2RSBri:
   case ARM::t2RSBrr:
   case ARM::t2RSBrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSB, Dl, getDefaultEVT(FuncInfo), Op2,
-                           Rn, getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
 
@@ -1171,30 +639,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::RSCrsr: {
     // RSC{S}<c> <Rd>,<Rn>, #0
     // RSC{S}<c>.W <Rd>,<Rn>,#<const>
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::RSC, Dl, getDefaultEVT(FuncInfo), Rn,
-                           Op2, getMDOperand(N))
-                 .getNode();
-    }
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
 
@@ -1208,15 +652,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   /* CLZ */
   case ARM::CLZ:
   case ARM::t2CLZ: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Node = CurDAG
-               ->getNode(ISD::CTLZ, Dl, getDefaultEVT(FuncInfo), Rn,
-                         getMDOperand(N))
-               .getNode();
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Function *CTLZ = Intrinsic::getDeclaration(BB->getParent()->getParent(),
                                                Intrinsic::ctlz, S0->getType());
@@ -1235,15 +670,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::SBCrr:
   case ARM::SBCri:
   case ARM::tSBC: {
-    SDValue Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    SDValue Operand2 = FuncInfo->getSDValueByRegister(N->getOperand(2));
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::SBC, Dl, getDefaultEVT(FuncInfo), Rn,
-                         Operand2, getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rn.getNode(), Node);
-    NPI->Node = Node;
     Value *S1 = FuncInfo->getOperand(MI, 0);
     Value *S2 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
@@ -1296,20 +722,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2TEQri:
   case ARM::t2TEQrr:
   case ARM::t2TEQrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::TEQ, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                         getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
 
@@ -1346,20 +758,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2TSTri:
   case ARM::t2TSTrr:
   case ARM::t2TSTrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-    Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::TST, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                         getMDOperand(N))
-               .getNode();
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
 
@@ -1397,32 +795,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2BICri:
   case ARM::t2BICrr:
   case ARM::t2BICrs: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = N->getOperand(1);
-
-    if (NPI->IsTwoAddress) {
-      if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-        Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-
-      SDValue Rd = FuncInfo->getSDValueByRegister(N->getOperand(0));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(FuncInfo), Rd, Rn,
-                           getMDOperand(N))
-                 .getNode();
-    } else {
-      SDValue Op2 = N->getOperand(2);
-      if (RegisterSDNode::classof(Op2.getNode()))
-        Op2 = FuncInfo->getSDValueByRegister(Op2);
-
-      Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-      Node = CurDAG
-                 ->getNode(EXT_ARMISD::BIC, Dl, getDefaultEVT(FuncInfo), Rn,
-                           Op2, getMDOperand(N))
-                 .getNode();
-    }
-
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
     Type *Ty = getDefaultType();
@@ -1468,17 +840,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   /* MLA */
   case ARM::MLA:
   case ARM::t2MLA: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rn = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    SDValue Rm = FuncInfo->getSDValueByRegister(N->getOperand(2));
-    SDValue Ra = FuncInfo->getSDValueByRegister(N->getOperand(3));
-
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::MLA, Dl, getDefaultEVT(FuncInfo), Rn, Rm,
-                         Ra, getMDOperand(N))
-               .getNode();
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S0 = FuncInfo->getOperand(MI, 0);
     Value *S1 = FuncInfo->getOperand(MI, 1);
     Value *S2 = FuncInfo->getOperand(MI, 2);
@@ -1490,18 +851,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   } break;
   /* UXTB */
   case ARM::UXTB: {
-    SDValue Rd = N->getOperand(0);
-    SDValue Rm = N->getOperand(1);
-    SDValue Rotation = N->getOperand(2);
-
-    if (RegisterSDNode::classof(N->getOperand(1).getNode()))
-      Rm = FuncInfo->getSDValueByRegister(N->getOperand(1));
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::UXTB, Dl, getDefaultEVT(FuncInfo), Rd, Rm,
-                         Rotation, getMDOperand(N))
-               .getNode();
-    FuncInfo->recordDefinition(Rd.getNode(), Node);
-    NPI->Node = Node;
     Value *S1 = FuncInfo->getOperand(MI, 1);
     Value *RotationVal = FuncInfo->getOperand(MI, 2);
     Value *RorVal = ConstantInt::get(getDefaultType(), 8, true);
@@ -1528,15 +877,6 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::MRSsys:
   case ARM::t2MRS_AR:
   case ARM::t2MRSsys_AR: {
-    SDValue Rn = N->getOperand(0);
-    if (RegisterSDNode::classof(Rn.getNode()))
-      Rn = FuncInfo->getSDValueByRegister(Rn);
-
-    Node = CurDAG
-               ->getNode(EXT_ARMISD::MRS, Dl, getDefaultEVT(FuncInfo), Rn,
-                         getMDOperand(N))
-               .getNode();
-    NPI->Node = Node;
     Value *RnVal = FuncInfo->getOperand(MI, 0);
     // Reserved || N_Flag << 31 || Z_Flag << 30 || C_Flag << 29 || V_Flag << 28
     PointerType *PtrTy = PointerType::getInt32PtrTy(Ctx);
@@ -1565,7 +905,8 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *CVVal = IRB.CreateAdd(CShift, VShift);
     Value *NZCVVal = IRB.CreateAdd(NZVal, CVVal);
     Value *Reserved =
-        callCreateAlignedLoad(BB, M->getGlobalVariable("Reserved"));
+        callCreateAlignedLoad(BB,
+                              getModule()->getGlobalVariable("Reserved"));
 
     Value *CPSRVal = IRB.CreateAdd(NZCVVal, Reserved);
     Value *RnPtr = IRB.CreateIntToPtr(RnVal, PtrTy);
@@ -1629,8 +970,5 @@ void ARMMachineInstructionRaiser::emitInstr(
     outs() << "WARNING: ARM::VTRN Not yet implemented!\n";
   } break;
     // TODO: Need to add other pattern matching here.
-    auto *TII = getMF().getSubtarget().getInstrInfo();
-    outs() << "WARNING: ARM::" << TII->getName(MI.getOpcode())
-           << " Not yet implemented!\n";
   }
 }

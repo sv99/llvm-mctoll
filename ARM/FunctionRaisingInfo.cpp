@@ -11,44 +11,21 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "ARMMachineInstructionRaiser.h"
+#include "ARMBaseRegisterInfo.h"
 #include "FunctionRaisingInfo.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
-#include "llvm/CodeGen/SelectionDAG.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/Instructions.h"
 
 using namespace llvm;
 using namespace llvm::mctoll;
 
 /// Initialize this FunctionRaisingInfo with the given Function and its
 /// associated MachineFunction.
-void FunctionRaisingInfo::set(
-    ARMModuleRaiser &MRVal, Function &FNVal, MachineFunction &MFVal,
-    SelectionDAG &DAGVal) {
-  MR = &MRVal;
-  Fn = &FNVal;
-  MF = &MFVal;
-  DAG = &DAGVal;
-  CTX = &MR->getModule()->getContext();
-  DLT = &MR->getModule()->getDataLayout();
-
-  DefaultType = Type::getIntNTy(*CTX, DLT->getPointerSizeInBits());
-}
-
-SDValue FunctionRaisingInfo::getSDValueByRegister(unsigned Reg) {
-  assert((RegNodeMap.count(Reg) != 0) &&
-         "Can not find the corresponding value!");
-  return SDValue(RegNodeMap[Reg], 0);
-}
-
-void FunctionRaisingInfo::setSDValueByRegister(unsigned Reg, SDValue Val) {
-  assert((Val.getNode() != nullptr) && "Can not map a nullptr to a register!");
-  RegNodeMap[Reg] = Val.getNode();
-}
-
-SDValue FunctionRaisingInfo::getSDValueByRegister(SDValue Val) {
-  Register Reg = static_cast<RegisterSDNode *>(Val.getNode())->getReg();
-  return (RegNodeMap.count(Reg) == 0) ? Val : SDValue(RegNodeMap[Reg], 0);
+void FunctionRaisingInfo::set(ARMMachineInstructionRaiser &TheMIR) {
+  MIR = &TheMIR;
 }
 
 /// Clear out all the function-specific state. This returns this
@@ -56,16 +33,22 @@ SDValue FunctionRaisingInfo::getSDValueByRegister(SDValue Val) {
 /// different function.
 void FunctionRaisingInfo::clear() {
   MBBMap.clear();
-  // ValueMap.clear();
-  RegNodeMap.clear();
-  ArgValMap.clear();
-  NodeRegMap.clear();
   AllocaMap.clear();
   RetValMap.clear();
-  NPMap.clear();
-  VMap.clear();
   RegVMap.clear();
   NPVMap.clear();
+}
+
+/// Check the stack slot index is represented argument or not.
+bool FunctionRaisingInfo::isArgumentIndex(int FrameIndex) {
+  assert(FrameIndex >= 0 && "The stack frame index must be larger than 0.");
+  return FrameIndex > 0 &&
+         (unsigned)FrameIndex <= MIR->getRaisedFunction()->arg_size();
+}
+/// Check the index is stack slot index or not.
+bool FunctionRaisingInfo::isStackIndex(int FrameIndex) {
+  assert(FrameIndex >= 0 && "The stack frame index must be larger than 0.");
+  return (unsigned)FrameIndex > MIR->getRaisedFunction()->arg_size();
 }
 
 /// Get the corresponding BasicBlock of given MachineBasicBlock.
@@ -73,6 +56,9 @@ void FunctionRaisingInfo::clear() {
 /// on current Function, and returns it.
 BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
   // Function *Fn = getCRF();
+  Function *Fn = MIR->getRaisedFunction();
+  MachineFunction *MF = &MIR->getMF();
+
   if (MBB == nullptr)
     return BasicBlock::Create(Fn->getContext(), "", Fn);
 
@@ -92,68 +78,21 @@ BasicBlock *FunctionRaisingInfo::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
   return Block;
 }
 
-/// Gets the related IR Value of given SDNode.
-Value *FunctionRaisingInfo::getRealValue(SDNode *Node) {
-  assert(Node != nullptr && "Node cannot be nullptr!");
-  assert(VMap.count(Node) != 0 &&
-         "Cannot find value for the corresponding node!");
-  return VMap[Node];
-}
-
-/// Set the related IR Value to SDNode.
-void FunctionRaisingInfo::setRealValue(SDNode *Node, Value *V) {
-  VMap[Node] = V;
-}
-
-/// Gets the related IR Value of given Register.
-Value *FunctionRaisingInfo::getRegisterValue(Register Reg) {
-  assert(ArgValMap.count(Reg) != 0 &&
-         "Cannot find value for the corresponding register!");
-  return ArgValMap[Reg]; // RegVMap[Reg];
-}
-
-/// Set the related IR Value to Register.
-void FunctionRaisingInfo::setRegisterValue(Register Reg, Value *V) {
-  RegVMap[Reg] = V;
-}
-
-Value *FunctionRaisingInfo::getIRValue(SDValue Val) {
-  SDNode *N = Val.getNode();
-
-  if (ConstantSDNode::classof(N))
-    return const_cast<ConstantInt *>(
-        (static_cast<ConstantSDNode *>(N))->getConstantIntValue());
-
-  return getRealValue(N);
-}
-
 Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
   const MachineOperand &MO = MI.getOperand(Num);
   Value *Operand = nullptr;
   if (MO.isReg() && !MO.isDebug()) {
     auto Reg = MO.getReg();
-//    if (ArgValMap.count(Reg) == 0) {
-//      // first use register
-//      if (Reg > ARM::NUM_TARGET_REGS) {
-//        // Virtual register used in the splitted MI.
-//        Operand = ConstantInt::get(DefaultType, 0);
-//      } else {
-//        assert(false &&
-//               "Cannot find value for the corresponding register!");
-//      }
-//    } else {
-//      Operand = ArgValMap[Reg];
-//    }
-    if (checkArgValue(Reg)) {
-      Operand = ArgValMap[Reg];
+    if (checkRegValue(Reg)) {
+      Operand = RegVMap[Reg];
     } else {
       //      assert(ArgValMap.count(Reg) != 0 &&
       //             "Cannot find value for the corresponding register!");
       // TODO operand not exists
-      Operand = ConstantInt::get(getDefaultType(), 0);
+      Operand = ConstantInt::get(MIR->getDefaultType(), 0);
     }
   } else if (MO.isImm()) {
-    Operand = ConstantInt::get(getDefaultType(), MO.getImm());
+    Operand = ConstantInt::get(MIR->getDefaultType(), MO.getImm());
    } else if (MO.isFI()) {
     // Frame index
     int FI = MO.getIndex();
@@ -161,7 +100,7 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
     if (isStackIndex(FI)) {
       Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(FI));
     } else if (isArgumentIndex(FI)) {
-      Operand = const_cast<Argument *>(getRaisedFunction()->arg_begin() + (FI - 1));
+      Operand = const_cast<Argument *>(MIR->getRaisedFunction()->arg_begin() + (FI - 1));
     } else if (isReturnIndex(FI)) {
       Operand = const_cast<AllocaInst *>(MFI.getObjectAllocation(0));
     } else {
@@ -169,9 +108,9 @@ Value *FunctionRaisingInfo::getOperand(const MachineInstr &MI, unsigned Num) {
     }
   } else if (MO.isJTI()) {
     // Jump table index
-    Operand = ConstantInt::get(getDefaultType(), MO.getIndex());
+    Operand = ConstantInt::get(MIR->getDefaultType(), MO.getIndex());
   } else if (MO.isSymbol()) {
-    Operand = MR->getModule()->getNamedGlobal(MO.getSymbolName());
+    Operand = MIR->getModule()->getNamedGlobal(MO.getSymbolName());
   } else {
     dbgs() << "Warning: visit. An unmatch type! = "
            << (unsigned)(MO.getType()) << "\n";
@@ -191,7 +130,6 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
   // Initialize the NodePropertyInfo properties.
   NodeInfo->MI = &MI;
   NodeInfo->HasCPSR = false;
-  NodeInfo->Special = false;
   NodeInfo->UpdateCPSR = false;
   NodeInfo->IsCond = false;
   NodeInfo->IfBB = nullptr;
@@ -221,7 +159,6 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
       assert(MI.getOperand(Idx - 1).isImm() &&
              "Attempt to get non-imm operand!");
       NodeInfo->Cond = MI.getOperand(Idx - 1).getImm();
-      NodeInfo->Special = true;
       NodeInfo->UpdateCPSR = true;
       NodeInfo->IsCond = NodeInfo->Cond != ARMCC::AL;
     } else {
@@ -241,43 +178,8 @@ NodePropertyInfo *FunctionRaisingInfo::initNPI(const MachineInstr &MI) {
   return NodeInfo;
 }
 
-/// Checks the SDNode is a function return or not.
-bool FunctionRaisingInfo::isReturnNode(SDNode *Node) {
-  if (!FrameIndexSDNode::classof(Node))
-    return false;
-
-  return isReturnIndex(dyn_cast<FrameIndexSDNode>(Node)->getIndex());
-}
-
-/// Record the new defined Node, it uses to map the register number to Node.
-/// In DAG emitter, emitter get a value of use base on this defined Node.
-void FunctionRaisingInfo::recordDefinition(SDNode *OldOpNode, SDNode *NewNode) {
-  assert(NewNode != nullptr &&
-         "The new SDNode ptr is null when record define!");
-
-  if (OldOpNode == nullptr) {
-    outs() << "Warning: RecordDefine error, the SDNode ptr is null!\n";
-    return;
-  }
-
-  if (RegisterSDNode::classof(OldOpNode)) {
-    Register OpReg = static_cast<RegisterSDNode *>(OldOpNode)->getReg();
-    setSDValueByRegister(OpReg, SDValue(NewNode, 0));
-    NodeRegMap[NewNode] = OpReg;
-  }
-
-  if (isReturnNode(OldOpNode)) {
-    //FuncInfo->setRetSDValue(SDValue(NewNode, 0));
-    setSDValueByRegister(ARM::R0, SDValue(NewNode, 0));
-    NodeRegMap[NewNode] = ARM::R0;
-  }
-}
-
 void FunctionRaisingInfo::recordDefinition(NodePropertyInfo *NPI, Value *Val) {
   assert(Val != nullptr && "The new Value ptr is null when record define!");
-  // update Node records TODO remove after full update
-  setRealValue(NPI->Node, Val);
-  setArgValue(NPI->Node, Val);
   NPVMap[NPI] = Val;
   auto *Op = &NPI->MI->getOperand(0);
   if (Op->isReg()) {
@@ -290,5 +192,5 @@ void FunctionRaisingInfo::recordDefinition(NodePropertyInfo *NPI, Value *Val) {
 }
 
 void FunctionRaisingInfo::recordDefinition(Register Reg, Value *Val) {
-  ArgValMap[Reg] = Val;
+  RegVMap[Reg] = Val;
 }

@@ -32,8 +32,8 @@ PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
   PHINode *Phi = PHINode::Create(getDefaultType(), 2, "", ElseBB);
 
   auto *BB = IRB.GetInsertBlock();
-  if (FuncInfo->checkArgValue(ARM::R0)) {
-    Phi->addIncoming(FuncInfo->getArgValue(ARM::R0), BB);
+  if (FuncInfo->checkRegValue(ARM::R0)) {
+    Phi->addIncoming(FuncInfo->getRegValue(ARM::R0), BB);
   } else {
     auto *Zero = ConstantInt::get(getDefaultType(), 0, true);
     Instruction *TermInst = BB->getTerminator();
@@ -152,9 +152,9 @@ void ARMMachineInstructionRaiser::emitCPSR(
   Type *Ty = IRB.getInt1Ty();
   Type *OperandTy = getDefaultType();
   Function *FSigned =
-      Intrinsic::getDeclaration(M, Intrinsic::sadd_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::sadd_with_overflow, OperandTy);
   Function *FUnsigned =
-      Intrinsic::getDeclaration(M, Intrinsic::uadd_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::uadd_with_overflow, OperandTy);
   Value *Args[] = {Operand0, Operand1};
   Value *UnsignedSum;
   Value *SignedSum;
@@ -197,9 +197,9 @@ void ARMMachineInstructionRaiser::emitCMN(
   Type *Ty = IRB.getInt1Ty();
   Type *OperandTy = getDefaultType();
   Function *FSigned =
-      Intrinsic::getDeclaration(M, Intrinsic::sadd_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::sadd_with_overflow, OperandTy);
   Function *FUnsigned =
-      Intrinsic::getDeclaration(M, Intrinsic::uadd_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::uadd_with_overflow, OperandTy);
   Value *Args[] = {Operand0, Operand1};
   Value *UnsignedSum;
   Value *SignedSum;
@@ -235,9 +235,9 @@ void ARMMachineInstructionRaiser::emitCMP(
   Type *Ty = IRB.getInt1Ty();
   Type *OperandTy = getDefaultType();
   Function *FSigned =
-      Intrinsic::getDeclaration(M, Intrinsic::ssub_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::ssub_with_overflow, OperandTy);
   Function *FUnsigned =
-      Intrinsic::getDeclaration(M, Intrinsic::usub_with_overflow, OperandTy);
+      Intrinsic::getDeclaration(getModule(), Intrinsic::usub_with_overflow, OperandTy);
   Value *Args[] = {Operand0, Operand1};
   Value *UnsignedSum;
   Value *SignedSum;
@@ -555,7 +555,7 @@ Value *ARMMachineInstructionRaiser::emitLoad(
     IRBuilder<> &IRB, NodePropertyInfo *NPI) {
   Value *Result = nullptr;
   auto *BB = IRB.GetInsertBlock();
-  auto *DLT = &M->getDataLayout();
+  auto *DLT = &getDataLayout();
   IRB.SetCurrentDebugLocation(NPI->MI->getDebugLoc());
 
   Value *S = FuncInfo->getOperand(NPI, 0);
@@ -622,7 +622,7 @@ void ARMMachineInstructionRaiser::emitStore(
     IRBuilder<> &IRB, NodePropertyInfo *NPI) {
   auto &MI = *NPI->MI;
   auto *BB = IRB.GetInsertBlock();
-  auto *DLT = &M->getDataLayout();
+  auto *DLT = &getDataLayout();
   IRB.SetCurrentDebugLocation(MI.getDebugLoc());
 
   Value *Val = FuncInfo->getOperand(MI, 0);
@@ -737,7 +737,7 @@ void ARMMachineInstructionRaiser::emitSwitchInstr(
 Value *ARMMachineInstructionRaiser::emitBRD(
     IRBuilder<> &IRB, NodePropertyInfo *NPI) {
   auto *BB = IRB.GetInsertBlock();
-  auto *DLT = &M->getDataLayout();
+  auto *DLT = &getDataLayout();
   IRB.SetCurrentDebugLocation(NPI->MI->getDebugLoc());
 
   // Get the function call Index.
@@ -772,7 +772,7 @@ Value *ARMMachineInstructionRaiser::emitBRD(
   CallInst *Inst = nullptr;
   if (ArgNum > 0) {
     Value *ArgVal = nullptr;
-    const MachineFrameInfo &MFI = FuncInfo->getFrameInfo();
+    const MachineFrameInfo &MFI = MF.getFrameInfo();
     unsigned StackArg = 0; // Initialize argument size on stack to 0.
     if (ArgNum > 4) {
       StackArg = ArgNum - 4;
@@ -783,7 +783,7 @@ Value *ARMMachineInstructionRaiser::emitBRD(
     }
     for (unsigned Idx = 0; Idx < ArgNum; Idx++) {
       if (Idx < 4)
-        ArgVal = FuncInfo->getArgValue(ARM::R0 + Idx);
+        ArgVal = FuncInfo->getRegValue(ARM::R0 + Idx);
       else {
         const AllocaInst *StackAlloc =
             MFI.getObjectAllocation(StackArg - Idx - 4 + 1);

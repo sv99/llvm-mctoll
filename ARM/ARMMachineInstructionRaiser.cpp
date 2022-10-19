@@ -26,7 +26,6 @@ ARMMachineInstructionRaiser::ARMMachineInstructionRaiser(
       MachineRegInfo(MF.getRegInfo()),
       TargetInfo(MF.getSubtarget<ARMSubtarget>()),
       Ctx(MR->getModule()->getContext()){
-  M = MR->getModule();
   InstrInfo = TargetInfo.getInstrInfo();
   RegisterInfo = TargetInfo.getRegisterInfo();
   const ARMModuleRaiser *ConstAMR = dyn_cast<ARMModuleRaiser>(MR);

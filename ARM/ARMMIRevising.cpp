@@ -270,7 +270,7 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
     assert(SymNameVal &&
            "Failed to find symbol associated with dynamic relocation.");
     auto SymName = SymNameVal.get();
-    GlobVal = M->getGlobalVariable(SymName);
+    GlobVal = getModule()->getGlobalVariable(SymName);
     if (GlobVal == nullptr) {
       DataRefImpl SymImpl = Symbol->getRawDataRefImpl();
       auto SymbOrErr = ObjFile->getSymbol(SymImpl);
@@ -342,7 +342,7 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
           GlobInit = ConstantInt::get(GlobValTy, InitVal);
         }
 
-        auto *GlobVar = new GlobalVariable(*M, GlobValTy, false /* isConstant */,
+        auto *GlobVar = new GlobalVariable(*getModule(), GlobValTy, false /* isConstant */,
                                           Linkage, GlobInit, SymName);
         uint64_t Align = 32;
         switch (SymSz) {
@@ -378,7 +378,7 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
 
       // Find if a global value associated with symbol name is already
       // created
-      GlobVal = M->getGlobalVariable(LocalNameRef);
+      GlobVal = getModule()->getGlobalVariable(LocalNameRef);
       if (GlobVal == nullptr) {
         uint64_t DataAddr = Offset;
         if (InstRaiser->getMCInstAt(Index) != InstRaiser->const_mcinstr_end()) {
@@ -418,7 +418,7 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
               Constant *StrConstant =
                   ConstantDataArray::getString(Ctx, ROStringRef);
               auto *GlobalStrConstVal = new GlobalVariable(
-                  *M, StrConstant->getType(), /* isConstant */ true,
+                  *getModule(), StrConstant->getType(), /* isConstant */ true,
                   GlobalValue::PrivateLinkage, StrConstant, "RO-String");
               // Record the mapping between offset and global value
               TargetMR->addRODataValueAt(GlobalStrConstVal, Offset);
@@ -433,7 +433,8 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
           MCInstOrData MD = InstRaiser->getMCInstAt(Index)->second;
           uint32_t Data = MD.getData();
           Constant *GlobInit = ConstantInt::get(Ty, Data);
-          auto *GlobVar = new GlobalVariable(*M, Ty, /* isConstant */ true,
+          auto *GlobVar = new GlobalVariable(*getModule(), Ty,
+                                             /* isConstant */ true,
                                             GlobalValue::PrivateLinkage,
                                             GlobInit, LocalNameRef);
           MaybeAlign MA(32);

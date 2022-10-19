@@ -75,7 +75,7 @@ unsigned ARMMachineInstructionRaiser::getBitCount(unsigned Opcode) {
 
   switch (Opcode) {
   default:
-    Ret = Log2(M->getDataLayout().getStackAlignment());
+    Ret = Log2(getDataLayout().getStackAlignment());
     break;
   case ARM::LDRi12:
   case ARM::STRi12:
@@ -103,7 +103,7 @@ Type *ARMMachineInstructionRaiser::getStackType(unsigned Size) {
 
   switch (Size) {
   default:
-    T = Type::getIntNTy(Ctx, M->getDataLayout().getPointerSizeInBits());
+    T = Type::getIntNTy(Ctx, getDataLayout().getPointerSizeInBits());
     break;
   case 8:
     T = Type::getInt64Ty(Ctx);

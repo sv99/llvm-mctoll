@@ -21,7 +21,6 @@ add_llvm_library(mctollARMRaiser
   FunctionRaisingInfo.cpp
   ARMSelectionDAGISel.cpp
   ARMMachineInstructionRaiser.cpp
-  ARMVisit.cpp
   ARMIREmitter.cpp
   ARMIREmitterUtils.cpp
 
@@ -36,10 +35,8 @@ add_llvm_library(mctollARMRaiser
   MC
   MCDisassembler
   Object
-  SelectionDAG
   Symbolize
   Support
-  SelectionDAG
   Target
   )
 
