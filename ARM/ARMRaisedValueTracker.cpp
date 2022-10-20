@@ -42,7 +42,6 @@ bool ARMRaisedValueTracker::isStackIndex(int FrameIndex) {
 /// on current Function, and returns it.
 BasicBlock *
 ARMRaisedValueTracker::getOrCreateBasicBlock(MachineBasicBlock *MBB) {
-  // Function *Fn = getCRF();
   Function *Fn = MIR->getRaisedFunction();
   MachineFunction *MF = &MIR->getMF();
 

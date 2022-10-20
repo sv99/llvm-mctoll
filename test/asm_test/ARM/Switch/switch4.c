@@ -1,8 +1,9 @@
+// UNSUPPORTED: true
 // RUN: clang -target arm -mfloat-abi=soft -c -o %t.o %s
 // RUN: llvm-mctoll -d  %t.o 2>&1 | FileCheck %s
 
-// CHECK: switch i32 %2, label %3 [
-// CHECK-NEXT:   i32 0, label %sw.bb0
+// CHECK: switch i32 %2, label %5 [
+// CHECK-NEXT:   i32 4, label %sw.bb0
 // CHECK-NEXT:   i32 1, label %sw.bb1
 // CHECK-NEXT:   i32 2, label %sw.bb2
 // CHECK-NEXT:   i32 3, label %sw.bb3

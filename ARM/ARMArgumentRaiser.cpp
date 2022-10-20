@@ -126,7 +126,6 @@ void ARMMachineInstructionRaiser::updateParameterInstr() {
 }
 
 bool ARMMachineInstructionRaiser::raiseArgs() {
-  LLVM_DEBUG(dbgs() << "ARMArgumentRaiser start.\n");
 
   int ArgIdx = 1;
   for (Argument &Arg : RaisedFunction->args())
@@ -140,9 +139,9 @@ bool ARMMachineInstructionRaiser::raiseArgs() {
   updateParameterInstr();
 
   // For debugging.
+  LLVM_DEBUG(dbgs() << "CFG : After ARM Argument Raiser\n");
   LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(getRaisedFunction()->dump());
-  LLVM_DEBUG(dbgs() << "ARMArgumentRaiser end.\n");
+  LLVM_DEBUG(RaisedFunction->dump());
 
   return true;
 }

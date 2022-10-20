@@ -275,15 +275,12 @@ void ARMMachineInstructionRaiser::searchStackObjects() {
 }
 
 bool ARMMachineInstructionRaiser::buildFrame() {
-  LLVM_DEBUG(dbgs() << "ARMFrameBuilder start.\n");
-
   searchStackObjects();
 
   // For debugging.
+  LLVM_DEBUG(dbgs() << "CFG : After ARM Frame Builder\n");
   LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(RaisedFunction->dump());
-  LLVM_DEBUG(dbgs() << "ARMFrameBuilder end.\n");
-
   return true;
 }
 

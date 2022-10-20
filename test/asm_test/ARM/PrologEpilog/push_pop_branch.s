@@ -1,12 +1,12 @@
 # RUN: clang -target arm -mfloat-abi=soft -c -o %t.o %s
 # RUN: llvm-mctoll -d  -debug %t.o 2>&1 | FileCheck %s
 
-# CHECK: ARMEliminatePrologEpilog start
+# CHECK: CFG : After ARM Eliminate Prolog Epilog
 # CHECK: Frame Objects:
 # CHECK-NOT: $sp = STMDB_UPD %SP
 # CHECK-NOT: $sp = ADDri $r11
 # CHECK-NOT: $r11, $sp = LDR_POST_IMM $sp
-# CHECK: ARMEliminatePrologEpilog end
+# CHECK: # End machine code for function test2.
 
 # test push pop and branch
         .global test2

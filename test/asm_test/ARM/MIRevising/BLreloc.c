@@ -1,8 +1,7 @@
 // RUN: clang -target arm -mfloat-abi=soft -c -o %t.o %s
 // RUN: llvm-mctoll -d -debug  %t.o 2>&1 | FileCheck %s
-// CHECK: ARMMIRevising start
+// CHECK: CFG : After ARM MI Revising
 // CHECK: BL 32,
-// CHECK: ARMMIRevising end
 
 int func1(int a, int b) {
   return a + b;

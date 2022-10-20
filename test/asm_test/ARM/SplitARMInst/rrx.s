@@ -1,12 +1,11 @@
 # RUN: clang -target arm -mfloat-abi=soft -c -o %t.o %s
 # RUN: llvm-mctoll -d -debug  %t.o 2>&1 | FileCheck %s
 
-# CHECK: ARMInstructionSplitting start
+# CHECK: CFG : After ARM Instruction Splitting
 # CHECK: %0:gprnopc = RRX $r0, <{{0x[0-9a-f]+}}>, implicit $cpsr
 # CHECK-NEXT: $r0 = ADDrr $r1, %0:gprnopc
 # CHECK-NEXT: %1:gprnopc = RRX $r1, <{{0x[0-9a-f]+}}>, implicit $cpsr
 # CHECK-NEXT: $r0 = MOVr %1:gprnopc
-# CHECK: ARMInstructionSplitting end
 
   .text
   .align 4

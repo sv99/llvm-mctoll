@@ -556,7 +556,6 @@ bool ARMMachineInstructionRaiser::reviseMI(MachineInstr &MI) {
 
 bool ARMMachineInstructionRaiser::revise() {
   bool Res = false;
-  LLVM_DEBUG(dbgs() << "ARMMIRevising start.\n");
 
   vector<MachineInstr *> RMVec;
   for (MachineFunction::iterator MBBIter = MF.begin(), MBBEnd = MF.end();
@@ -575,8 +574,8 @@ bool ARMMachineInstructionRaiser::revise() {
   for (MachineInstr *PMI : RMVec)
     PMI->eraseFromParent();
 
+  LLVM_DEBUG(dbgs() << "CFG : After ARM MI Revising\n");
   LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(dbgs() << "ARMMIRevising end.\n");
 
   return Res;
 }

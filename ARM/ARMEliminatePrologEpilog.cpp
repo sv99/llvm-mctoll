@@ -191,7 +191,7 @@ bool ARMMachineInstructionRaiser::eliminateProlog() {
     FrontMBB.erase(PrologInstrs[Idx]);
   }
 
-  return true;
+  return DelInstSz > 0;
 }
 
 bool ARMMachineInstructionRaiser::eliminateEpilog() {
@@ -312,8 +312,6 @@ void ARMMachineInstructionRaiser::analyzeFrameAdjustment() {
 }
 
 bool ARMMachineInstructionRaiser::eliminate() {
-  LLVM_DEBUG(dbgs() << "ARMEliminatePrologEpilog start.\n");
-
   analyzeStackSize();
   analyzeFrameAdjustment();
   bool Success = eliminateProlog();
@@ -323,9 +321,8 @@ bool ARMMachineInstructionRaiser::eliminate() {
   }
 
   // For debugging.
+  LLVM_DEBUG(dbgs() << "CFG : After ARM Eliminate Prolog Epilog\n");
   LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(RaisedFunction->dump());
-  LLVM_DEBUG(dbgs() << "ARMEliminatePrologEpilog end.\n");
 
   return !Success;
 }

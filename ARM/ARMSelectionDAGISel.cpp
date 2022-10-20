@@ -32,8 +32,6 @@ void ARMMachineInstructionRaiser::initEntryBasicBlock() {
 }
 
 bool ARMMachineInstructionRaiser::doSelection() {
-  LLVM_DEBUG(dbgs() << "ARM raising start.\n");
-
   RaisedValues = new ARMRaisedValueTracker(*this);
 
   initEntryBasicBlock();
@@ -64,9 +62,9 @@ bool ARMMachineInstructionRaiser::doSelection() {
       BranchInst::Create(LBB, &FBB);
 
   // For debugging.
+  LLVM_DEBUG(dbgs() << "CFG : After ARM Raising\n");
   LLVM_DEBUG(MF.dump());
   LLVM_DEBUG(RaisedFunction->dump());
-  LLVM_DEBUG(dbgs() << "ARM raising end.\n");
 
   return true;
 }

@@ -14,7 +14,7 @@ add_llvm_library(mctollARMRaiser
   ARMFunctionPrototype.cpp
   ARMMIRevising.cpp
   ARMEliminatePrologEpilog.cpp
-  ARMCreateJumpTable.cpp
+    ARMJumpTable.cpp
   ARMArgumentRaiser.cpp
   ARMFrameBuilder.cpp
   ARMInstructionSplitting.cpp

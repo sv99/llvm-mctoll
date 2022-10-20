@@ -1101,8 +1101,6 @@ MachineInstr *ARMMachineInstructionRaiser::splitCS(MachineBasicBlock &MBB,
 }
 
 bool ARMMachineInstructionRaiser::split() {
-  LLVM_DEBUG(dbgs() << "ARMInstructionSplitting start.\n");
-
   std::vector<MachineInstr *> RemoveList;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;
@@ -1180,9 +1178,8 @@ bool ARMMachineInstructionRaiser::split() {
     MI->removeFromParent();
 
   // For debugging.
+  LLVM_DEBUG(dbgs() << "CFG : After ARM Instruction Splitting\n");
   LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(getRaisedFunction()->dump());
-  LLVM_DEBUG(dbgs() << "ARMInstructionSplitting end.\n");
 
   return true;
 }

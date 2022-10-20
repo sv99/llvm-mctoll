@@ -35,7 +35,7 @@ ARMMachineInstructionRaiser::ARMMachineInstructionRaiser(
 bool ARMMachineInstructionRaiser::raise() {
   revise();
   eliminate();
-  createJumpTable();
+  raiseMachineJumpTable();
   raiseArgs();
   buildFrame();
   split();
@@ -80,8 +80,8 @@ FunctionType *ARMMachineInstructionRaiser::getRaisedFunctionPrototype() {
 MachineFunctionRaiser *ARMModuleRaiser::CreateAndAddMachineFunctionRaiser(
     Function *F, const ModuleRaiser *MR, uint64_t Start, uint64_t End) {
   MachineFunctionRaiser *MFR = new MachineFunctionRaiser(
-      *M, MR->getMachineModuleInfo()->getOrCreateMachineFunction(*F), MR, Start,
-      End);
+      *M, MR->getMachineModuleInfo()->getOrCreateMachineFunction(*F),
+      MR, Start, End);
   MFR->setMachineInstrRaiser(new ARMMachineInstructionRaiser(
       MFR->getMachineFunction(), MR, MFR->getMCInstRaiser()));
   MFRaiserVector.push_back(MFR);

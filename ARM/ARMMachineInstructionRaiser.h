@@ -73,10 +73,10 @@ private:
 
   /// Discover machine function prototype.
   Function *discoverPrototype();
-  /// Check the first reference of the reg is USE.
-  bool isUsedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
-  /// Check the first reference of the reg is DEF.
-  bool isDefinedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
+  /// Check the first reference of the reg in the MBB is USE.
+  bool isUsedRegister(unsigned Reg, const MachineBasicBlock &MBB);
+  /// Check the last reference of the reg in the MBB is DEF.
+  bool isDefinedRegister(unsigned Reg, const MachineBasicBlock &MBB);
   /// Get all arguments types of current MachineFunction.
   void genParameterTypes(std::vector<Type *> &ParamTypes);
   /// Get return type of current MachineFunction.
@@ -111,7 +111,6 @@ private:
   void analyzeFrameAdjustment();
 
   // 3 step: create jump table
-  bool createJumpTable();
   unsigned int getARMCPSR(unsigned int PhysReg);
   bool raiseMachineJumpTable();
   /// Get the MachineBasicBlock to add the jump table instruction.

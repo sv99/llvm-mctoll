@@ -24,8 +24,8 @@
 using namespace llvm;
 using namespace llvm::mctoll;
 
-/// Check the first reference of the reg is USE.
-bool ARMMachineInstructionRaiser::isUsedRegiser(unsigned Reg,
+/// Check the first reference of the reg in the MBB is USE.
+bool ARMMachineInstructionRaiser::isUsedRegister(unsigned Reg,
                                          const MachineBasicBlock &MBB) {
   for (const MachineInstr &MI : MBB.instrs()) {
     for (const MachineOperand &MO : MI.operands()) {
@@ -118,9 +118,9 @@ void ARMMachineInstructionRaiser::genParameterTypes(std::vector<Type *> &ParamVe
   }
 }
 
-/// Get all arguments types of current MachineFunction.
-bool ARMMachineInstructionRaiser::isDefinedRegiser(unsigned Reg,
-                                            const MachineBasicBlock &MBB) {
+/// Check the last reference of the reg in the MBB is DEF.
+bool ARMMachineInstructionRaiser::isDefinedRegister(
+    unsigned Reg, const MachineBasicBlock &MBB) {
   for (MachineBasicBlock::const_reverse_iterator Ii = MBB.rbegin(),
                                                  Ie = MBB.rend();
        Ii != Ie; ++Ii) {
@@ -147,7 +147,7 @@ Type *ARMMachineInstructionRaiser::genReturnType() {
   RetTy = Type::getVoidTy(Ctx);
   for (const MachineBasicBlock &MBB : MF) {
     if (MBB.succ_empty()) {
-      if (isDefinedRegiser(ARM::R0, MBB)) {
+      if (isDefinedRegister(ARM::R0, MBB)) {
         // TODO: Need to identify data type, int, long, float or double.
         RetTy = getDefaultType();
         break;
@@ -159,9 +159,7 @@ Type *ARMMachineInstructionRaiser::genReturnType() {
 }
 
 Function *ARMMachineInstructionRaiser::discoverPrototype() {
-  LLVM_DEBUG(dbgs() << "ARMFunctionPrototype start.\n");
-
-  Function &Fn = const_cast<Function &>(MF.getFunction());
+  Function &Fn = MF.getFunction();
 
   std::vector<Type *> ParamTys;
   genParameterTypes(ParamTys);
@@ -177,10 +175,7 @@ Function *ARMMachineInstructionRaiser::discoverPrototype() {
   // EntryBlock at here.
   BasicBlock::Create(Pnfn->getContext(), "EntryBlock", Pnfn);
 
-  LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(Pnfn->dump());
-  LLVM_DEBUG(dbgs() << "ARMFunctionPrototype end.\n");
-
+  // Debug dump in the ModuleRaiser::runMachineFunctionPasses()
   return Pnfn;
 }
 

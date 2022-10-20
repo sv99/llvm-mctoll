@@ -305,6 +305,9 @@ bool ARMMachineInstructionRaiser::raiseMachineJumpTable() {
   for (auto *MBB : MBBsToBeErased) {
     MBB->eraseFromParent();
   }
+
+  LLVM_DEBUG(dbgs() << "CFG : After Raising Jump Tables\n");
+  LLVM_DEBUG(MF.dump());
   return true;
 }
 
@@ -314,19 +317,6 @@ unsigned int ARMMachineInstructionRaiser::getARMCPSR(unsigned int PhysReg) {
     return PhysReg;
   }
   return -1;
-}
-
-bool ARMMachineInstructionRaiser::createJumpTable() {
-  LLVM_DEBUG(dbgs() << "ARMCreateJumpTable start.\n");
-
-  raiseMachineJumpTable();
-
-  // For debugging.
-  LLVM_DEBUG(MF.dump());
-  LLVM_DEBUG(RaisedFunction->dump());
-  LLVM_DEBUG(dbgs() << "ARMCreateJumpTable end.\n");
-
-  return false;
 }
 
 #undef DEBUG_TYPE
