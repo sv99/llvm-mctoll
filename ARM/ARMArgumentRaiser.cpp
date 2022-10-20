@@ -23,7 +23,7 @@ using namespace llvm;
 using namespace llvm::mctoll;
 
 /// Change all return relative register operands to stack 0.
-void ARMMachineInstructionRaiser::updateReturnRegister(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateReturnRegister() {
   for (MachineBasicBlock &MBB : MF) {
     if (MBB.succ_empty()) {
       //bool Loop = true;
@@ -62,7 +62,7 @@ void ARMMachineInstructionRaiser::updateParameterRegister(unsigned Reg,
 }
 
 /// Change rest of function arguments on stack frame into stack elements.
-void ARMMachineInstructionRaiser::updateParameterFrame(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateParameterFrame() {
 
   for (MachineBasicBlock &MBB : MF) {
 
@@ -101,12 +101,12 @@ void ARMMachineInstructionRaiser::moveArgumentToRegister(unsigned Reg,
 
 /// updateParameterInstr - Using newly created stack elements replace relative
 /// operands in MachineInstr.
-void ARMMachineInstructionRaiser::updateParameterInstr(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::updateParameterInstr() {
   // Move arguments to corresponding registers.
   MachineBasicBlock &EntryMBB = MF.front();
   switch (RaisedFunction->arg_size()) {
   default:
-    updateParameterFrame(MF);
+    updateParameterFrame();
     LLVM_FALLTHROUGH;
   case 4:
     moveArgumentToRegister(ARM::R3, EntryMBB);
@@ -137,7 +137,7 @@ bool ARMMachineInstructionRaiser::raiseArgs() {
     MF.getFrameInfo().CreateStackObject(32, ALG, false);
   }
 
-  updateParameterInstr(MF);
+  updateParameterInstr();
 
   // For debugging.
   LLVM_DEBUG(MF.dump());

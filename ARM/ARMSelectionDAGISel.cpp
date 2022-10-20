@@ -12,7 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ARMMachineInstructionRaiser.h"
-#include "FunctionRaisingInfo.h"
+#include "ARMRaisedValueTracker.h"
 #include "llvm/Analysis/OptimizationRemarkEmitter.h"
 
 #define DEBUG_TYPE "mctoll"
@@ -26,7 +26,7 @@ void ARMMachineInstructionRaiser::initEntryBasicBlock() {
     Align MALG(32);
     AllocaInst *Alloc = new AllocaInst(Type::getInt1Ty(Ctx), 0,
                                        nullptr, MALG, "", EntryBlock);
-    FuncInfo->AllocaMap[Idx] = Alloc;
+    RaisedValues->AllocaMap[Idx] = Alloc;
     new StoreInst(ConstantInt::getFalse(Ctx), Alloc, EntryBlock);
   }
 }
@@ -34,12 +34,11 @@ void ARMMachineInstructionRaiser::initEntryBasicBlock() {
 bool ARMMachineInstructionRaiser::doSelection() {
   LLVM_DEBUG(dbgs() << "ARM raising start.\n");
 
-  FuncInfo = new FunctionRaisingInfo();
-  FuncInfo->set(*this);
+  RaisedValues = new ARMRaisedValueTracker(*this);
 
   initEntryBasicBlock();
   for (MachineBasicBlock &Block : MF) {
-    FuncInfo->getOrCreateBasicBlock(&Block);
+    RaisedValues->getOrCreateBasicBlock(&Block);
     selectBasicBlock(&Block);
   }
 
@@ -48,12 +47,12 @@ bool ARMMachineInstructionRaiser::doSelection() {
   // one and only exit. If the function has return value, this help return
   // R0.
   Function *CurFn = getRaisedFunction();
-  BasicBlock *LBB = FuncInfo->getOrCreateBasicBlock();
+  BasicBlock *LBB = RaisedValues->getOrCreateBasicBlock();
 
   if (CurFn->getReturnType()) {
     PHINode *LPHI = PHINode::Create(getRaisedFunction()->getReturnType(),
-                                    FuncInfo->RetValMap.size(), "", LBB);
-    for (auto Pair : FuncInfo->RetValMap)
+                                    RaisedValues->RetValMap.size(), "", LBB);
+    for (auto Pair : RaisedValues->RetValMap)
       LPHI->addIncoming(Pair.second, Pair.first);
 
     ReturnInst::Create(CurFn->getContext(), LPHI, LBB);
@@ -74,7 +73,7 @@ bool ARMMachineInstructionRaiser::doSelection() {
 
 void ARMMachineInstructionRaiser::selectBasicBlock(MachineBasicBlock *MBB) {
 
-  auto *BB = FuncInfo->getOrCreateBasicBlock(MBB);
+  auto *BB = RaisedValues->getOrCreateBasicBlock(MBB);
   IRBuilder<> IRB(BB);
 
   for (MachineInstr &MI : MBB->instrs()) {
@@ -86,12 +85,12 @@ void ARMMachineInstructionRaiser::selectBasicBlock(MachineBasicBlock *MBB) {
   // the return Value of each exit BasicBlock.
   Type *RTy = getRaisedFunction()->getReturnType();
   if (RTy != nullptr && !RTy->isVoidTy() && MBB->succ_size() == 0) {
-    auto *Val = FuncInfo->getRegValue(ARM::R0);
+    auto *Val = RaisedValues->getRegValue(ARM::R0);
     Instruction *TInst = dyn_cast<Instruction>(Val);
     assert(TInst && "A def R0 was pointed to a non-instruction!!!");
     BasicBlock *TBB = TInst->getParent();
     // TBB may don't be equal BB after inserting condition block.
-    FuncInfo->RetValMap[TBB] = TInst;
+    RaisedValues->RetValMap[TBB] = TInst;
   }
 }
 

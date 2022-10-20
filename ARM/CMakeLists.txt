@@ -18,7 +18,7 @@ add_llvm_library(mctollARMRaiser
   ARMArgumentRaiser.cpp
   ARMFrameBuilder.cpp
   ARMInstructionSplitting.cpp
-  FunctionRaisingInfo.cpp
+  ARMRaisedValueTracker.cpp
   ARMSelectionDAGISel.cpp
   ARMMachineInstructionRaiser.cpp
   ARMIREmitter.cpp

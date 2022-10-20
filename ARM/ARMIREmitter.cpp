@@ -13,7 +13,7 @@
 
 #include "ARM.h"
 #include "ARMMachineInstructionRaiser.h"
-#include "FunctionRaisingInfo.h"
+#include "ARMRaisedValueTracker.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/IR/IRBuilder.h"
@@ -29,9 +29,9 @@ using namespace llvm::mctoll;
                                                                                \
   Value *Inst = BinaryOperator::Create##OPC(S0, S1);                           \
   IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));                  \
-  PHINode *Phi = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,                    \
+  PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,                    \
                                       dyn_cast<Instruction>(Inst));            \
-  FuncInfo->recordDefinition(NPI, Phi);
+  RaisedValues->recordDefinition(AMI, Phi);
 
 #define HANDLE_EMIT_CONDCODE(OPC)                                              \
   HANDLE_EMIT_CONDCODE_COMMON(OPC)                                             \
@@ -43,7 +43,7 @@ using namespace llvm::mctoll;
 void ARMMachineInstructionRaiser::emitInstr(
     IRBuilder<> &IRB, const MachineInstr &MI) {
 
-  NodePropertyInfo *NPI = FuncInfo->initNPI(MI);
+  ARMMachineInstr *AMI = RaisedValues->initMachineInstr(MI);
   auto *BB = IRB.GetInsertBlock();
 
   switch (MI.getOpcode()) {
@@ -62,8 +62,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ADCrr:
   case ARM::t2ADCri:
   case ARM::t2ADCrs: {
-    Value * InstADC = emitADC(IRB, NPI);
-    FuncInfo->recordDefinition(NPI, InstADC);
+    Value * InstADC = emitADC(IRB, AMI);
+    RaisedValues->recordDefinition(AMI, InstADC);
   } break;
   /* ADD */
   case ARM::ADDri:
@@ -86,10 +86,10 @@ void ARMMachineInstructionRaiser::emitInstr(
     // 1. Check out MI is two-address or three-address
     // 2. Do with the displacement operation.(not yet implement.)
     // Judge the MI address module, then check out whether has the imm.
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryAdd(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryAdd(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* SUB */
   case ARM::SUBri:
@@ -105,10 +105,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2SUBrr:
   case ARM::t2SUBrs:
   case ARM::t2SUBS_PC_LR: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinarySub(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinarySub(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* MOV */
   case ARM::MOVi16:
@@ -125,9 +125,9 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::MOVi: {
     // Dispalcement operation need do.
     // Get exactly second operand.
-    Value *S1 = FuncInfo->getOperand(*NPI->MI, 1);
-    Value *Inst = emitBinaryAdd(IRB, NPI, S1, IRB.getInt32(0));
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S1 = RaisedValues->getOperand(*AMI->MI, 1);
+    Value *Inst = emitBinaryAdd(IRB, AMI, S1, IRB.getInt32(0));
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* STR */
   case ARM::STRi12:
@@ -144,7 +144,7 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::STR_PRE_REG:
   case ARM::STR_POST_IMM:
   case ARM::STR_POST_REG: {
-    emitStore(IRB, NPI);
+    emitStore(IRB, AMI);
   } break;
   case ARM::STRH:
   case ARM::STRH_PRE:
@@ -154,10 +154,10 @@ void ARMMachineInstructionRaiser::emitInstr(
 //    SDValue Op1 = N->getOperand(1);
 //
 //    if (RegisterSDNode::classof(Val.getNode()))
-//      Val = FuncInfo->getSDValueByRegister(Val);
+//      Val = RaisedValues->getSDValueByRegister(Val);
 //
 //    if (RegisterSDNode::classof(Op1.getNode()))
-//      Op1 = FuncInfo->getSDValueByRegister(Op1);
+//      Op1 = RaisedValues->getSDValueByRegister(Op1);
 //
 //    if (N->getNumOperands() < 5) {
 //      Node = CurDAG
@@ -166,15 +166,15 @@ void ARMMachineInstructionRaiser::emitInstr(
 //                 .getNode();
 //    } else {
 //      SDValue Op2 = N->getOperand(2);
-//      Op2 = FuncInfo->getSDValueByRegister(Op2);
+//      Op2 = RaisedValues->getSDValueByRegister(Op2);
 //      Node = CurDAG
 //                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
 //                           getMDOperand(N))
 //                 .getNode();
 //    }
 //
-//    NPI->Node = Node;
-    emitStore(IRB, NPI);
+//    AMI->Node = Node;
+    emitStore(IRB, AMI);
   } break;
   case ARM::STRBi12:
   case ARM::STRBrs:
@@ -187,10 +187,10 @@ void ARMMachineInstructionRaiser::emitInstr(
 //    SDValue Op1 = N->getOperand(1);
 //
 //    if (RegisterSDNode::classof(Val.getNode()))
-//      Val = FuncInfo->getSDValueByRegister(Val);
+//      Val = RaisedValues->getSDValueByRegister(Val);
 //
 //    if (RegisterSDNode::classof(Op1.getNode()))
-//      Op1 = FuncInfo->getSDValueByRegister(Op1);
+//      Op1 = RaisedValues->getSDValueByRegister(Op1);
 //
 //    if (N->getNumOperands() < 5) {
 //      Node = CurDAG
@@ -199,15 +199,15 @@ void ARMMachineInstructionRaiser::emitInstr(
 //                 .getNode();
 //    } else {
 //      SDValue Op2 = N->getOperand(2);
-//      Op2 = FuncInfo->getSDValueByRegister(Op2);
+//      Op2 = RaisedValues->getSDValueByRegister(Op2);
 //      Node = CurDAG
 //                 ->getNode(EXT_ARMISD::STORE, Dl, InstTy, Val, Op1, Op2,
 //                           getMDOperand(N))
 //                 .getNode();
 //    }
 //
-//    NPI->Node = Node;
-    emitStore(IRB, NPI);
+//    AMI->Node = Node;
+    emitStore(IRB, AMI);
   } break;
   /* LDR */
   case ARM::LDRi12:
@@ -219,8 +219,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::LDR_PRE_REG:
   case ARM::LDR_POST_IMM:
   case ARM::LDR_POST_REG: {
-    Value *LoadInst = emitLoad(IRB, NPI);
-    FuncInfo->recordDefinition(NPI, LoadInst);
+    Value *LoadInst = emitLoad(IRB, AMI);
+    RaisedValues->recordDefinition(AMI, LoadInst);
   } break;
   case ARM::LDRH:
   case ARM::LDRSH:
@@ -230,8 +230,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2LDRH_POST:
   case ARM::LDRSH_PRE:
   case ARM::LDRSH_POST: {
-    Value *LoadInst = emitLoad(IRB, NPI);
-    FuncInfo->recordDefinition(NPI, LoadInst);
+    Value *LoadInst = emitLoad(IRB, AMI);
+    RaisedValues->recordDefinition(AMI, LoadInst);
   } break;
   case ARM::LDRBi12:
   case ARM::LDRBrs:
@@ -245,8 +245,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::LDRB_POST_IMM:
   case ARM::LDRB_PRE_REG:
   case ARM::LDRB_POST_REG: {
-    Value *LoadInst = emitLoad(IRB, NPI);
-    FuncInfo->recordDefinition(NPI, LoadInst);
+    Value *LoadInst = emitLoad(IRB, AMI);
+    RaisedValues->recordDefinition(AMI, LoadInst);
   } break;
   /* Branch */
   case ARM::Bcc:
@@ -254,31 +254,31 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2Bcc: {
 //    const MachineBasicBlock *LMBB = MI.getParent();
 //    if (LMBB->succ_size() == 0) {
-//      FuncInfo->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
-//      FuncInfo->setNodeReg(Node, ARM::R0);
+//      RaisedValues->setSDValueByRegister(ARM::R0, SDValue(Node, 0));
+//      RaisedValues->setNodeReg(Node, ARM::R0);
 //    }
-//    NPI->Node = Node;
+//    AMI->Node = Node;
     // emit
-    if (NPI->HasCPSR) {
+    if (AMI->HasCPSR) {
       // br i1 %cmp, label %if.then, label %if.else
-      unsigned CondVal = NPI->Cond;
-      MachineBasicBlock *MBB = FuncInfo->getMBB(BB);
+      unsigned CondVal = AMI->Cond;
+      MachineBasicBlock *MBB = RaisedValues->getMBB(BB);
       MachineBasicBlock::succ_iterator SuI = MBB->succ_begin();
-      BasicBlock *IfTrueP = FuncInfo->getOrCreateBasicBlock(*SuI);
+      BasicBlock *IfTrueP = RaisedValues->getOrCreateBasicBlock(*SuI);
       MachineBasicBlock *NextMBB = &*std::next(MBB->getIterator());
-      BasicBlock *NextBB = FuncInfo->getOrCreateBasicBlock(NextMBB);
+      BasicBlock *NextBB = RaisedValues->getOrCreateBasicBlock(NextMBB);
 
       emitCondCode(IRB, IfTrueP, NextBB, CondVal);
     } else {
       // br label %xxx
-      MachineBasicBlock *LMBBVal = FuncInfo->getMBB(BB);
+      MachineBasicBlock *LMBBVal = RaisedValues->getMBB(BB);
       MachineBasicBlock::succ_iterator SuI = LMBBVal->succ_begin();
       if (SuI != LMBBVal->succ_end()) {
-        BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
+        BasicBlock *BrDest = RaisedValues->getOrCreateBasicBlock(*SuI);
         IRB.CreateBr(BrDest);
       } else {
-        Value *Inst = emitBRD(IRB, NPI);
-        FuncInfo->recordDefinition(ARM::R0, Inst);
+        Value *Inst = emitBRD(IRB, AMI);
+        RaisedValues->recordDefinition(ARM::R0, Inst);
       }
     }
   } break;
@@ -286,20 +286,20 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tB:
   case ARM::t2B: {
     // br label %xxx
-    MachineBasicBlock *LMBBVal = FuncInfo->getMBB(BB);
+    MachineBasicBlock *LMBBVal = RaisedValues->getMBB(BB);
     MachineBasicBlock::succ_iterator SuI = LMBBVal->succ_begin();
     if (SuI != LMBBVal->succ_end()) {
-      BasicBlock *BrDest = FuncInfo->getOrCreateBasicBlock(*SuI);
+      BasicBlock *BrDest = RaisedValues->getOrCreateBasicBlock(*SuI);
       IRB.CreateBr(BrDest);
     } else {
-      Value *Inst = emitBRD(IRB, NPI);
-      FuncInfo->recordDefinition(ARM::R0, Inst);
+      Value *Inst = emitBRD(IRB, AMI);
+      RaisedValues->recordDefinition(ARM::R0, Inst);
     }
   } break;
   case ARM::BL:
   case ARM::BL_pred:
   case ARM::tBL: {
-    emitBL(IRB, NPI);
+    emitBL(IRB, AMI);
    } break;
   case ARM::BLX:
   case ARM::BLXi:
@@ -308,10 +308,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tBLXr: {
     // Exchange instruction set A32 <-> T32 and branch.
     // For raising instruction set not important simply BL.
-    emitBL(IRB, NPI);
+    emitBL(IRB, AMI);
   } break;
   case ARM::BR_JTr: {
-    emitSwitchInstr(IRB, NPI, BB);
+    emitSwitchInstr(IRB, AMI, BB);
   } break;
   case ARM::BX:
   case ARM::BX_CALL:
@@ -319,7 +319,7 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tBX:
   case ARM::tBX_CALL: {
     // Get exactly first argument.
-    Value *FuncVal = FuncInfo->getOperand(MI, 0);
+    Value *FuncVal = RaisedValues->getOperand(MI, 0);
     unsigned NumDests = MI.getNumOperands(); // Node->getNumOperands();
     IRB.CreateIndirectBr(FuncVal, NumDests);
   } break;
@@ -337,8 +337,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tCMPr: {
     // set flags by result <Op1> - <Op2>
     // SBBS without store result
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
     emitCMP(IRB, S0, S1);
   } break;
   /* AND */
@@ -350,10 +350,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ANDri:
   case ARM::t2ANDrr:
   case ARM::t2ANDrs: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryAnd(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryAnd(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
     // TODO:
     // AND{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // AND{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -366,10 +366,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tASRri:
   case ARM::t2ASRrr:
   case ARM::t2ASRri: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryAShr(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryAShr(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* CMN */
   case ARM::CMNri:
@@ -378,8 +378,8 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2CMNri:
   case ARM::t2CMNzrr:
   case ARM::t2CMNzrs: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
     emitCMN(IRB, S0, S1);
   } break;
   /* EOR */
@@ -391,10 +391,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2EORrr:
   case ARM::t2EORrs:
   case ARM::t2EORri: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryXor(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
     // TODO:
     // EOR{S}<c>.W <Rd>,<Rn>,<Rm>{,<shift>}
     // EOR{S}<c> <Rd>,<Rn>,<Rm>{,<shift>}
@@ -408,7 +408,7 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2MSR_AR:
   case ARM::t2MSRbanked: {
     // Update the CPSR.
-    Value *CondVal = FuncInfo->getOperand(MI, 0);
+    Value *CondVal = RaisedValues->getOperand(MI, 0);
     // 1 1 1 1
     // N set 1 0 0 0   8
     // Z set 0 1 0 0   4
@@ -447,10 +447,10 @@ void ARMMachineInstructionRaiser::emitInstr(
     /* MULS <Rd>, <Rn>, <Rm> */
     /* MUL<c> <Rd>, <Rn>, <Rm> */
     /* MUL{S}<c> <Rd>, <Rn>, <Rm> */
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryMul(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryMul(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* MVN */
   case ARM::MVNi:
@@ -461,10 +461,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2MVNi:
   case ARM::t2MVNr:
   case ARM::t2MVNs: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryXor(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryXor(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* LSL */
   case ARM::LSLi:
@@ -473,10 +473,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tLSLrr:
   case ARM::t2LSLri:
   case ARM::t2LSLrr: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryShl(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryShl(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* LSR */
   case ARM::LSRi:
@@ -485,10 +485,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tLSRrr:
   case ARM::t2LSRri:
   case ARM::t2LSRrr: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryLShr(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryLShr(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* ORR */
   case ARM::ORRri:
@@ -499,10 +499,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2ORRri:
   case ARM::t2ORRrr:
   case ARM::t2ORRrs: {
-    Value *S0 = FuncInfo->getOperand(NPI, 0);
-    Value *S1 = FuncInfo->getOperand(NPI, 1);
-    Value *Inst = emitBinaryOr(IRB, NPI, S0, S1);
-    FuncInfo->recordDefinition(NPI, Inst);
+    Value *S0 = RaisedValues->getOperand(AMI, 0);
+    Value *S1 = RaisedValues->getOperand(AMI, 1);
+    Value *Inst = emitBinaryOr(IRB, AMI, S0, S1);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* ROR */
   case ARM::RORi:
@@ -510,18 +510,18 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::tROR:
   case ARM::t2RORri:
   case ARM::t2RORrr: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, 32, true);
 
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
+    if (AMI->HasCPSR) {
+      if (AMI->UpdateCPSR) {
         Value *InstSub = IRB.CreateSub(Val, S1);
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        FuncInfo->recordDefinition(NPI, Inst);
+        RaisedValues->recordDefinition(AMI, Inst);
 
         emitSpecialCPSR(IRB, Inst, 0);
       } else {
@@ -531,15 +531,15 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+        emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(Val, S1);
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        PHINode *Phi = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
-        FuncInfo->recordDefinition(NPI, Phi);
+        RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -548,23 +548,23 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *InstLShr = IRB.CreateLShr(S0, S1);
       Value *InstShl = IRB.CreateShl(S0, InstSub);
       Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* RRX */
   case ARM::RRX: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
     Type *Ty = getDefaultType();
     Value *Val1 = ConstantInt::get(Ty, 1, true);
     Value *Val2 = ConstantInt::get(Ty, 31, true);
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
+    if (AMI->HasCPSR) {
+      if (AMI->UpdateCPSR) {
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag = loadCFlag(IRB);
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        FuncInfo->recordDefinition(NPI, Inst);
+        RaisedValues->recordDefinition(AMI, Inst);
 
         /**************************************/
         emitSpecialCPSR(IRB, Inst, 0);
@@ -579,7 +579,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
         // Emit the condition code.
-        emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+        emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
         IRB.SetInsertPoint(IfBB);
         Value *InstLShr = IRB.CreateLShr(S0, Val1);
         Value *CFlag = nullptr;
@@ -588,9 +588,9 @@ void ARMMachineInstructionRaiser::emitInstr(
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        PHINode *Phi = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
-        FuncInfo->recordDefinition(NPI, Phi);
+        RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -600,7 +600,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       CFlag = IRB.CreateZExt(CFlag, Ty);
       Value *Bit31 = IRB.CreateShl(CFlag, Val2);
       Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* RSB */
@@ -612,15 +612,15 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2RSBri:
   case ARM::t2RSBrr:
   case ARM::t2RSBrs: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
 
-    if (NPI->HasCPSR) {
-      unsigned CondValue = NPI->Cond;
-      if (NPI->UpdateCPSR) {
+    if (AMI->HasCPSR) {
+      unsigned CondValue = AMI->Cond;
+      if (AMI->UpdateCPSR) {
         // Create add emit.
         Value *Inst = IRB.CreateSub(S0, S1);
-        FuncInfo->recordDefinition(NPI, Inst);
+        RaisedValues->recordDefinition(AMI, Inst);
 
         Value *InstNot = IRB.CreateNot(S1);
         emitCPSR(IRB, InstNot, S0, 1);
@@ -629,7 +629,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       }
     } else {
       Value *Inst = IRB.CreateSub(S0, S1);
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* RSC */
@@ -639,20 +639,20 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::RSCrsr: {
     // RSC{S}<c> <Rd>,<Rn>, #0
     // RSC{S}<c>.W <Rd>,<Rn>,#<const>
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
 
     Value *CFlag = loadCFlag(IRB);
     Value *CZext = IRB.CreateZExt(CFlag, getDefaultType());
 
     Value *Inst = IRB.CreateAdd(S0, CZext);
     Inst = IRB.CreateSub(S1, Inst);
-    FuncInfo->recordDefinition(NPI, Inst);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* CLZ */
   case ARM::CLZ:
   case ARM::t2CLZ: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
     Function *CTLZ = Intrinsic::getDeclaration(BB->getParent()->getParent(),
                                                Intrinsic::ctlz, S0->getType());
     Type *I1ype = llvm::IntegerType::getInt1Ty(Ctx);
@@ -664,24 +664,24 @@ void ARMMachineInstructionRaiser::emitInstr(
     ArrayRef<Value *> Args(Vec);
 
     Value *Inst = IRB.CreateCall(CTLZ, Args);
-    FuncInfo->recordDefinition(NPI, Inst);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* SBC */
   case ARM::SBCrr:
   case ARM::SBCri:
   case ARM::tSBC: {
-    Value *S1 = FuncInfo->getOperand(MI, 0);
-    Value *S2 = FuncInfo->getOperand(MI, 1);
+    Value *S1 = RaisedValues->getOperand(MI, 0);
+    Value *S2 = RaisedValues->getOperand(MI, 1);
     Type *Ty = getDefaultType();
 
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
+    if (AMI->HasCPSR) {
+      if (AMI->UpdateCPSR) {
         Value *InstSub = IRB.CreateSub(S1, S2);
         Value *CFlag = nullptr;
         CFlag = loadCFlag(IRB);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
-        FuncInfo->recordDefinition(NPI, InstSBC);
+        RaisedValues->recordDefinition(AMI, InstSBC);
         Value *InstNot = IRB.CreateNot(S2);
         if (1)
           emitCPSR(IRB, S1, InstNot, 0);
@@ -691,7 +691,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
 
-        emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+        emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
 
         IRB.SetInsertPoint(IfBB);
         Value *InstSub = IRB.CreateSub(S1, S2);
@@ -699,9 +699,9 @@ void ARMMachineInstructionRaiser::emitInstr(
         CFlag = loadCFlag(IRB);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *Inst = IRB.CreateAdd(InstSub, CZext);
-        PHINode *Phi = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
-        FuncInfo->recordDefinition(NPI, Phi);
+        RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
       }
@@ -711,7 +711,7 @@ void ARMMachineInstructionRaiser::emitInstr(
       CFlag = loadCFlag(IRB);
       Value *CZext = IRB.CreateZExt(CFlag, Ty);
       Value *InstSBC = IRB.CreateAdd(InstSub, CZext);
-      FuncInfo->recordDefinition(NPI, InstSBC);
+      RaisedValues->recordDefinition(AMI, InstSBC);
     }
   } break;
   /* TEQ */
@@ -722,10 +722,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2TEQri:
   case ARM::t2TEQrr:
   case ARM::t2TEQrs: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
 
-    if (NPI->HasCPSR) {
+    if (AMI->HasCPSR) {
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
@@ -734,19 +734,19 @@ void ARMMachineInstructionRaiser::emitInstr(
       // TODO:
       // This instruction not change def, consider phi later.
 
-      emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+      emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateXor(S0, S1);
       emitSpecialCPSR(IRB, Inst, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
 
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     } else {
       Value *Inst = IRB.CreateXor(S0, S1);
       emitSpecialCPSR(IRB, Inst, 0);
 
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* TST */
@@ -758,10 +758,10 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2TSTri:
   case ARM::t2TSTrr:
   case ARM::t2TSTrs: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
 
-    if (NPI->HasCPSR) {
+    if (AMI->HasCPSR) {
       // Create new BB for EQ instruction execute.
       BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
       // Create new BB to update the DAG BB.
@@ -771,19 +771,19 @@ void ARMMachineInstructionRaiser::emitInstr(
       // Not change def. Consider how to use PHI.
       // PHINode *Phi = createAndEmitPHINode(Node, BB, ElseBB);
 
-      emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+      emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
       IRB.SetInsertPoint(IfBB);
       Value *Inst = IRB.CreateAnd(S0, S1);
       emitSpecialCPSR(IRB, Inst, 0);
       IRB.CreateBr(ElseBB);
       IRB.SetInsertPoint(ElseBB);
 
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     } else {
       Value *Inst = IRB.CreateAnd(S0, S1);
       emitSpecialCPSR(IRB, Inst, 0);
 
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* BIC */
@@ -795,17 +795,17 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::t2BICri:
   case ARM::t2BICrr:
   case ARM::t2BICrs: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
     Type *Ty = getDefaultType();
     Value *Val = ConstantInt::get(Ty, -1, true);
 
-    if (NPI->HasCPSR) {
-      if (NPI->UpdateCPSR) {
+    if (AMI->HasCPSR) {
+      if (AMI->UpdateCPSR) {
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
 
-        FuncInfo->recordDefinition(NPI, Inst);
+        RaisedValues->recordDefinition(AMI, Inst);
 
         emitSpecialCPSR(IRB, Inst, 0);
         // Update C flag.
@@ -819,13 +819,13 @@ void ARMMachineInstructionRaiser::emitInstr(
         // Create new BB to update the DAG BB.
         BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
         // Emit the condition code.
-        emitCondCode(IRB, IfBB, ElseBB, NPI->Cond);
+        emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
         IRB.SetInsertPoint(IfBB);
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
-        PHINode *Phi = createAndEmitPHINode(IRB, NPI, IfBB, ElseBB,
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
                                             dyn_cast<Instruction>(Inst));
-        FuncInfo->recordDefinition(NPI, Phi);
+        RaisedValues->recordDefinition(AMI, Phi);
 
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -834,25 +834,25 @@ void ARMMachineInstructionRaiser::emitInstr(
       Value *InstXor, *Inst;
       InstXor = IRB.CreateXor(Val, S1);
       Inst = IRB.CreateAnd(S0, InstXor);
-      FuncInfo->recordDefinition(NPI, Inst);
+      RaisedValues->recordDefinition(AMI, Inst);
     }
   } break;
   /* MLA */
   case ARM::MLA:
   case ARM::t2MLA: {
-    Value *S0 = FuncInfo->getOperand(MI, 0);
-    Value *S1 = FuncInfo->getOperand(MI, 1);
-    Value *S2 = FuncInfo->getOperand(MI, 2);
+    Value *S0 = RaisedValues->getOperand(MI, 0);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
+    Value *S2 = RaisedValues->getOperand(MI, 2);
 
     Value *InstMul = IRB.CreateMul(S0, S1);
     Value *Inst = IRB.CreateAdd(InstMul, S2);
 
-    FuncInfo->recordDefinition(NPI, Inst);
+    RaisedValues->recordDefinition(AMI, Inst);
   } break;
   /* UXTB */
   case ARM::UXTB: {
-    Value *S1 = FuncInfo->getOperand(MI, 1);
-    Value *RotationVal = FuncInfo->getOperand(MI, 2);
+    Value *S1 = RaisedValues->getOperand(MI, 1);
+    Value *RotationVal = RaisedValues->getOperand(MI, 2);
     Value *RorVal = ConstantInt::get(getDefaultType(), 8, true);
     Value *AddVal = ConstantInt::get(getDefaultType(), 0, true);
     Value *AndVal = ConstantInt::get(getDefaultType(), 0xff, true);
@@ -860,7 +860,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *InstLshr = IRB.CreateLShr(S1, InstMul);
     Value *InstAdd = IRB.CreateAdd(InstLshr, AddVal);
     Value *InstAnd = IRB.CreateAnd(InstAdd, AndVal);
-    FuncInfo->recordDefinition(NPI, InstAnd);
+    RaisedValues->recordDefinition(AMI, InstAnd);
   } break;
   case ARM::MCR:
   case ARM::MCRR:
@@ -877,7 +877,7 @@ void ARMMachineInstructionRaiser::emitInstr(
   case ARM::MRSsys:
   case ARM::t2MRS_AR:
   case ARM::t2MRSsys_AR: {
-    Value *RnVal = FuncInfo->getOperand(MI, 0);
+    Value *RnVal = RaisedValues->getOperand(MI, 0);
     // Reserved || N_Flag << 31 || Z_Flag << 30 || C_Flag << 29 || V_Flag << 28
     PointerType *PtrTy = PointerType::getInt32PtrTy(Ctx);
     Type *Ty = Type::getInt32Ty(Ctx);
@@ -912,7 +912,7 @@ void ARMMachineInstructionRaiser::emitInstr(
     Value *RnPtr = IRB.CreateIntToPtr(RnVal, PtrTy);
     Value *RnStore = IRB.CreateStore(CPSRVal, RnPtr);
 
-    FuncInfo->recordDefinition(NPI, RnStore);
+    RaisedValues->recordDefinition(AMI, RnStore);
   } break;
   /* ABS */
   case ARM::ABS:

@@ -33,18 +33,13 @@ ARMMachineInstructionRaiser::ARMMachineInstructionRaiser(
 }
 
 bool ARMMachineInstructionRaiser::raise() {
-
   revise();
   eliminate();
   createJumpTable();
   raiseArgs();
   buildFrame();
   split();
-
-//  ARMSelectionDAGISel SelDis(AMR, &MF, RaisedFunction);
-//  SelDis.setjtList(JTList);
   doSelection();
-
   return true;
 }
 
@@ -70,7 +65,7 @@ Value *ARMMachineInstructionRaiser::getRegOrArgValue(unsigned PReg, int MBBNo) {
 }
 
 FunctionType *ARMMachineInstructionRaiser::getRaisedFunctionPrototype() {
-  RaisedFunction = discoverPrototype(MF);
+  RaisedFunction = discoverPrototype();
 
   Function *Ori = const_cast<Function *>(&MF.getFunction());
   // Insert the map of raised function to tempFunctionPointer.

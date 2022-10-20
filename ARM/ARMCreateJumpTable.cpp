@@ -36,7 +36,7 @@ using namespace llvm;
 using namespace llvm::mctoll;
 
 /// Get the MachineBasicBlock to add the jump table instruction.
-MachineBasicBlock *ARMMachineInstructionRaiser::checkJumpTableBB(MachineFunction &MF) {
+MachineBasicBlock *ARMMachineInstructionRaiser::checkJumpTableBB() {
   MachineBasicBlock *JumpTableBB = nullptr;
   for (MachineBasicBlock &MBB : MF) {
     for (MachineInstr &MI : MBB.instrs()) {
@@ -97,7 +97,7 @@ bool ARMMachineInstructionRaiser::updateTheBranchInst(MachineBasicBlock &MBB) {
 }
 
 /// Raise the machine jump table according to the CFG.
-bool ARMMachineInstructionRaiser::raiseMachineJumpTable(MachineFunction &MF) {
+bool ARMMachineInstructionRaiser::raiseMachineJumpTable() {
   // A vector to record MBBs that need to be erased upon jump table creation.
   std::vector<MachineBasicBlock *> MBBsToBeErased;
 
@@ -319,7 +319,7 @@ unsigned int ARMMachineInstructionRaiser::getARMCPSR(unsigned int PhysReg) {
 bool ARMMachineInstructionRaiser::createJumpTable() {
   LLVM_DEBUG(dbgs() << "ARMCreateJumpTable start.\n");
 
-  raiseMachineJumpTable(MF);
+  raiseMachineJumpTable();
 
   // For debugging.
   LLVM_DEBUG(MF.dump());

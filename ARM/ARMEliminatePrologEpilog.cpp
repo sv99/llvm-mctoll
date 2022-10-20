@@ -67,7 +67,7 @@ bool ARMMachineInstructionRaiser::checkRegister(
 ///       sub r11, r12, #16
 ///
 ///       ldmdb r13, {r4-r11, r13, r15}
-bool ARMMachineInstructionRaiser::eliminateProlog(MachineFunction &MF) const {
+bool ARMMachineInstructionRaiser::eliminateProlog() {
   std::vector<MachineInstr *> PrologInstrs;
   MachineBasicBlock &FrontMBB = MF.front();
 
@@ -194,7 +194,7 @@ bool ARMMachineInstructionRaiser::eliminateProlog(MachineFunction &MF) const {
   return true;
 }
 
-bool ARMMachineInstructionRaiser::eliminateEpilog(MachineFunction &MF) const {
+bool ARMMachineInstructionRaiser::eliminateEpilog() {
   const ARMSubtarget &STI = MF.getSubtarget<ARMSubtarget>();
   const ARMBaseRegisterInfo *RegInfo = STI.getRegisterInfo();
   const ARMBaseInstrInfo *TII = STI.getInstrInfo();
@@ -274,7 +274,7 @@ bool ARMMachineInstructionRaiser::eliminateEpilog(MachineFunction &MF) const {
 /// Analyze stack size base on moving sp.
 /// Patterns like:
 /// sub	sp, sp, #28
-void ARMMachineInstructionRaiser::analyzeStackSize(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::analyzeStackSize() {
   if (MF.size() < 1)
     return;
 
@@ -294,7 +294,7 @@ void ARMMachineInstructionRaiser::analyzeStackSize(MachineFunction &MF) {
 /// Analyze frame adjustment base on the offset between fp and base sp.
 /// Patterns like:
 /// add	fp, sp, #8
-void ARMMachineInstructionRaiser::analyzeFrameAdjustment(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::analyzeFrameAdjustment() {
   if (MF.size() < 1)
     return;
 
@@ -314,12 +314,12 @@ void ARMMachineInstructionRaiser::analyzeFrameAdjustment(MachineFunction &MF) {
 bool ARMMachineInstructionRaiser::eliminate() {
   LLVM_DEBUG(dbgs() << "ARMEliminatePrologEpilog start.\n");
 
-  analyzeStackSize(MF);
-  analyzeFrameAdjustment(MF);
-  bool Success = eliminateProlog(MF);
+  analyzeStackSize();
+  analyzeFrameAdjustment();
+  bool Success = eliminateProlog();
 
   if (Success) {
-    Success = eliminateEpilog(MF);
+    Success = eliminateEpilog();
   }
 
   // For debugging.

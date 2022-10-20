@@ -14,8 +14,8 @@
 #ifndef LLVM_TOOLS_LLVM_MCTOLL_ARM_ARMMACHINEINSTRUCTIONRAISER_H
 #define LLVM_TOOLS_LLVM_MCTOLL_ARM_ARMMACHINEINSTRUCTIONRAISER_H
 
+#include "ARMRaisedValueTracker.h"
 #include "ARMSubtarget.h"
-#include "FunctionRaisingInfo.h"
 #include "Raiser/MachineInstructionRaiser.h"
 
 namespace llvm {
@@ -29,7 +29,7 @@ namespace mctoll {
 
 // Forward declaration
 class ARMModuleRaiser;
-class FunctionRaisingInfo;
+class ARMRaisedValueTracker;
 
 // Type alias for Map of MBBNo -> BasicBlock * used to keep track of
 // MachineBasicBlock and corresponding raised BasicBlock
@@ -66,13 +66,13 @@ private:
   ARMModuleRaiser *TargetMR;
   LLVMContext &Ctx;
   /// The function raising state storage.
-  FunctionRaisingInfo *FuncInfo;
+  ARMRaisedValueTracker *RaisedValues;
 
   // A map of MachineFunctionBlock number to BasicBlock *
   MBBNumToBBMap MbbToBBMap;
 
   /// Discover machine function prototype.
-  Function *discoverPrototype(MachineFunction &MF);
+  Function *discoverPrototype();
   /// Check the first reference of the reg is USE.
   bool isUsedRegiser(unsigned Reg, const MachineBasicBlock &MBB);
   /// Check the first reference of the reg is DEF.
@@ -86,50 +86,50 @@ private:
   bool revise();
   bool reviseMI(MachineInstr &MI);
   /// Remove some useless operations of instructions.
-  bool removeNeedlessInst(MachineInstr *MInst);
+  bool removeNeedlessInst(MachineInstr *MI);
   /// Create function for external function.
   uint64_t getCalledFunctionAtPLTOffset(uint64_t PLTEndOff, uint64_t CallAddr);
   /// Relocate call branch instructions in object files.
-  void relocateBranch(MachineInstr &MInst);
+  void relocateBranch(MachineInstr &MI);
   /// Address PC relative data in function, and create corresponding global
   /// value.
-  void addressPCRelativeData(MachineInstr &MInst);
+  void addressPCRelativeData(MachineInstr &MI);
   /// Decode modified immediate constants in some instructions with immediate
   /// operand.
-  void decodeModImmOperand(MachineInstr &MInst);
+  void decodeModImmOperand(MachineInstr &MI);
   /// Find global value by PC offset.
   const Value *getGlobalValueByOffset(int64_t MCInstOffset, uint64_t PCOffset);
 
   // 2 step: Eliminate prolog-epilog
   bool eliminate();
   bool checkRegister(unsigned Reg, std::vector<MachineInstr *> &Instrs) const;
-  bool eliminateProlog(MachineFunction &MF) const;
-  bool eliminateEpilog(MachineFunction &MF) const;
+  bool eliminateProlog();
+  bool eliminateEpilog();
   /// Analyze stack size base on moving sp.
-  void analyzeStackSize(MachineFunction &MF);
+  void analyzeStackSize();
   /// Analyze frame adjustment base on the offset between fp and base sp.
-  void analyzeFrameAdjustment(MachineFunction &MF);
+  void analyzeFrameAdjustment();
 
   // 3 step: create jump table
   bool createJumpTable();
   unsigned int getARMCPSR(unsigned int PhysReg);
-  bool raiseMachineJumpTable(MachineFunction &MF);
-  /// Get the MachineBasicBlock to add the jumptable instruction.
-  MachineBasicBlock *checkJumpTableBB(MachineFunction &MF);
+  bool raiseMachineJumpTable();
+  /// Get the MachineBasicBlock to add the jump table instruction.
+  MachineBasicBlock *checkJumpTableBB();
   bool updateTheBranchInst(MachineBasicBlock &MBB);
 
   // 4 step: raise arguments
   bool raiseArgs();
   /// Change all return relative register operands to stack 0.
-  void updateReturnRegister(MachineFunction &MF);
+  void updateReturnRegister();
   /// Change all function arguments of registers into stack elements with
   /// same indexes of arguments.
   void updateParameterRegister(unsigned Reg, MachineBasicBlock &MBB);
   /// Change rest of function arguments on stack frame into stack elements.
-  void updateParameterFrame(MachineFunction &MF);
+  void updateParameterFrame();
   /// Using newly created stack elements replace relative operands in
   /// MachineInstr.
-  void updateParameterInstr(MachineFunction &MF);
+  void updateParameterInstr();
   /// Move arguments which are passed by ARM registers(R0 - R3) from function
   /// arg.x to corresponding registers in entry block.
   void moveArgumentToRegister(unsigned Reg, MachineBasicBlock &MBB);
@@ -153,7 +153,7 @@ private:
   /// Analyze frame index of stack operands.
   int64_t identifyStackOp(const MachineInstr &MI);
   /// Find out all of frame relative operands, and update them.
-  void searchStackObjects(MachineFunction &MF);
+  void searchStackObjects();
   /// Records of assigned common registers by sp.
   SmallVector<unsigned, 16> RegAssignedBySP;
 
@@ -180,7 +180,7 @@ private:
   MachineInstr *splitCS(MachineBasicBlock &MBB, MachineInstr &MI,
                         unsigned NewOpc, int Idx);
   /// True if the ARM instruction performs Shift_C().
-  bool isShift_C(unsigned Opcode); // NOLINT(readability-identifier-naming)
+  bool isShiftC(unsigned Opcode);
   /// No matter what pattern of Load/Store is, change the Opcode to xxxi12.
   unsigned getLoadStoreOpcode(unsigned Opcode);
   /// If the MI is load/store which needs wback, it will return true.
@@ -199,29 +199,29 @@ private:
   void emitInstr(IRBuilder<> &IRB, const MachineInstr &MI);
 
   /// Check if instruction is conditional and emit begin for the If-Else block.
-  void checkConditionBegin(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  void checkConditionBegin(IRBuilder<> &IRB, ARMMachineInstr *AMI);
   /// For conditional instruction emit end for the If-Elseblock.
-  Value *checkConditionEnd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *checkConditionEnd(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                            Value *Result, std::function<void()> EmitUpdate);
 
   // Emit binary operations.
-  Value *emitBinaryAdd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryAdd(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
-  Value *emitBinarySub(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinarySub(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
-  Value *emitBinaryMul(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryMul(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
-  Value *emitBinaryShl(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryShl(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
-  Value *emitBinaryLShr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryLShr(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                       Value *S0, Value *S1);
-  Value *emitBinaryAShr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryAShr(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                       Value *S0, Value *S1);
-  Value *emitBinaryAnd(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryAnd(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
-  Value *emitBinaryOr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryOr(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                     Value *S0, Value *S1);
-  Value *emitBinaryXor(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitBinaryXor(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                      Value *S0, Value *S1);
 
   // Update the N Z C V flags for binary operation, called from macros.
@@ -255,15 +255,15 @@ private:
   void saveCFlag(IRBuilder<> &IRB, Value *CFlag);
   void saveVFlag(IRBuilder<> &IRB, Value *VFlag);
 
-  Value *emitADC(IRBuilder<> &IRB, NodePropertyInfo *NPI);
-  Value *emitLoad(IRBuilder<> &IRB, NodePropertyInfo *NPI);
-  void emitStore(IRBuilder<> &IRB, NodePropertyInfo *NPI);
-  void emitBL(IRBuilder<> &IRB, NodePropertyInfo *NPI);
-  void emitSwitchInstr(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  Value *emitADC(IRBuilder<> &IRB, ARMMachineInstr *AMI);
+  Value *emitLoad(IRBuilder<> &IRB, ARMMachineInstr *AMI);
+  void emitStore(IRBuilder<> &IRB, ARMMachineInstr *AMI);
+  void emitBL(IRBuilder<> &IRB, ARMMachineInstr *AMI);
+  void emitSwitchInstr(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                        BasicBlock *BB);
-  Value *emitBRD(IRBuilder<> &IRB, NodePropertyInfo *NPI);
+  Value *emitBRD(IRBuilder<> &IRB, ARMMachineInstr *AMI);
   /// Create PHINode for value use selection when running.
-  PHINode *createAndEmitPHINode(IRBuilder<> &IRB, NodePropertyInfo *NPI,
+  PHINode *createAndEmitPHINode(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                                 BasicBlock *IfBB, BasicBlock *ElseBB,
                                 Instruction *IfInst);
 

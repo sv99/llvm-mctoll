@@ -118,8 +118,8 @@ unsigned ARMMachineInstructionRaiser::getLoadStoreOpcode(unsigned Opcode) {
   }
 }
 
-/// True if the ARM instruction performs Shift_C().
-bool ARMMachineInstructionRaiser::isShift_C(unsigned Opcode) {
+/// True if the ARM instruction performs ShiftC().
+bool ARMMachineInstructionRaiser::isShiftC(unsigned Opcode) {
   switch (Opcode) {
   case ARM::ANDrsr:
   case ARM::ANDrsi:
@@ -659,7 +659,7 @@ MachineInstr *ARMMachineInstructionRaiser::splitS(MachineBasicBlock &MBB,
         MachineOperand &Rm = MI.getOperand(OpIdx - 1);
 
         // C flag is affected by Shift_c() if isShift_C is true.
-        if (isShift_C(MI.getOpcode())) {
+        if (isShiftC(MI.getOpcode())) {
           if (SOffSet) {
             // Split opcode<s> Rd, Rn, Rm, shift #imm.
 
@@ -939,7 +939,7 @@ MachineInstr *ARMMachineInstructionRaiser::splitCS(MachineBasicBlock &MBB,
         MDNode *MDNSec = MDNode::get(Ctx, CMDSec);
 
         // C flag is affected by Shift_c() if isShift_C is true.
-        if (isShift_C(MI.getOpcode())) {
+        if (isShiftC(MI.getOpcode())) {
           if (SOffSet) {
             // Split opcode<s><c> Rd, Rn, Rm, shift #imm
 

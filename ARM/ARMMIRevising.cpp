@@ -170,8 +170,8 @@ uint64_t ARMMachineInstructionRaiser::getCalledFunctionAtPLTOffset(
 }
 
 /// Relocate call branch instructions in object files.
-void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MInst) {
-  int64_t RelCallTargetOffset = MInst.getOperand(0).getImm();
+void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MI) {
+  int64_t RelCallTargetOffset = MI.getOperand(0).getImm();
   const ELF32LEObjectFile *Elf32LEObjFile =
       dyn_cast<ELF32LEObjectFile>(MR->getObjectFile());
   assert(Elf32LEObjFile != nullptr &&
@@ -184,7 +184,7 @@ void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MInst) {
 
     // Get MCInst offset - the offset of machine instruction in the binary
     // and instruction size
-    int64_t MCInstOffset = getMCInstIndex(MInst);
+    int64_t MCInstOffset = getMCInstIndex(MI);
     int64_t CallAddr = MCInstOffset + TextSectionAddress;
     int64_t CallTargetIndex = CallAddr + RelCallTargetOffset + 8;
     assert(InstRaiser != nullptr && "MCInstRaiser was not initialized");
@@ -204,21 +204,21 @@ void ARMMachineInstructionRaiser::relocateBranch(MachineInstr &MInst) {
 
       if (CalledFunc == nullptr) {
         if (Index == 0)
-          MInst.getOperand(0).setImm(CallTargetIndex);
+          MI.getOperand(0).setImm(CallTargetIndex);
         else if (Index != 1)
-          MInst.getOperand(0).setImm(Index);
+          MI.getOperand(0).setImm(Index);
         else
           assert(false && "Failed to get the call function!");
       } else
-        MInst.getOperand(0).setImm(CallTargetIndex);
+        MI.getOperand(0).setImm(CallTargetIndex);
     }
   } else {
-    uint64_t Offset = getMCInstIndex(MInst);
+    uint64_t Offset = getMCInstIndex(MI);
     const RelocationRef *Reloc = MR->getTextRelocAtOffset(Offset, 4);
     assert(Reloc && "Failed to get relocation ref");
     auto ImmValOrErr = (*Reloc->getSymbol()).getValue();
     assert(ImmValOrErr && "Failed to get immediate value");
-    MInst.getOperand(0).setImm(*ImmValOrErr);
+    MI.getOperand(0).setImm(*ImmValOrErr);
   }
 }
 
@@ -450,17 +450,17 @@ const Value *ARMMachineInstructionRaiser::getGlobalValueByOffset(
 }
 
 /// Address PC relative data in function, and create corresponding global value.
-void ARMMachineInstructionRaiser::addressPCRelativeData(MachineInstr &MInst) {
+void ARMMachineInstructionRaiser::addressPCRelativeData(MachineInstr &MI) {
   int64_t Imm = 0;
   // To match the pattern: OPCODE Rx, [PC, #IMM]
-  if (MInst.getNumOperands() > 2) {
-    assert(MInst.getOperand(2).isImm() &&
+  if (MI.getNumOperands() > 2) {
+    assert(MI.getOperand(2).isImm() &&
            "The third operand must be immediate data!");
-    Imm = MInst.getOperand(2).getImm();
+    Imm = MI.getOperand(2).getImm();
   }
   // Get MCInst offset - the offset of machine instruction in the binary
   // and instruction size
-  int64_t MCInstOffset = getMCInstIndex(MInst);
+  int64_t MCInstOffset = getMCInstIndex(MI);
   const Value *GlobVal =
       getGlobalValueByOffset(MCInstOffset, static_cast<uint64_t>(Imm) + 8);
 
@@ -472,13 +472,13 @@ void ARMMachineInstructionRaiser::addressPCRelativeData(MachineInstr &MInst) {
   // or
   // add     r1, pc, r1
   // second instruction may be with negative offset
-  MachineInstr *NInst = MInst.getNextNode();
+  MachineInstr *NInst = MI.getNextNode();
   // To match the pattern: OPCODE Rx, [PC, Rd], Rd must be the def of previous
   // instruction.
   if (NInst->getNumOperands() >= 2 && NInst->getOperand(1).isReg() &&
       NInst->getOperand(1).getReg() == ARM::PC &&
       NInst->getOperand(2).isReg() &&
-      NInst->getOperand(2).getReg() == MInst.getOperand(0).getReg()) {
+      NInst->getOperand(2).getReg() == MI.getOperand(0).getReg()) {
     auto *GV = dyn_cast<GlobalVariable>(GlobVal);
     if (GV != nullptr && GV->isConstant()) {
       // Firstly, read the PC relative data according to PC offset.
@@ -498,21 +498,21 @@ void ARMMachineInstructionRaiser::addressPCRelativeData(MachineInstr &MInst) {
   // Replace PC relative operands to symbol operand.
   // The pattern will be generated.
   // ldr r3, [pc, #20] => ldr r3, @globalvalue
-  MInst.getOperand(1).ChangeToES(GlobVal->getName().data());
+  MI.getOperand(1).ChangeToES(GlobVal->getName().data());
 
-  if (MInst.getNumOperands() > 2) {
-    MInst.removeOperand(2);
+  if (MI.getNumOperands() > 2) {
+    MI.removeOperand(2);
   }
 }
 
 /// Decode modified immediate constants in some instructions with immediate
 /// operand.
-void ARMMachineInstructionRaiser::decodeModImmOperand(MachineInstr &MInst) {
-  switch (MInst.getOpcode()) {
+void ARMMachineInstructionRaiser::decodeModImmOperand(MachineInstr &MI) {
+  switch (MI.getOpcode()) {
   default:
     break;
   case ARM::ORRri:
-    MachineOperand &MO = MInst.getOperand(2);
+    MachineOperand &MO = MI.getOperand(2);
     unsigned Bits = MO.getImm() & 0xFF;
     unsigned Rot = (MO.getImm() & 0xF00) >> 7;
     int64_t Rotated = static_cast<int64_t>(ARM_AM::rotr32(Bits, Rot));
@@ -523,10 +523,10 @@ void ARMMachineInstructionRaiser::decodeModImmOperand(MachineInstr &MInst) {
 
 /// Remove some useless operations of instructions. Some instructions like
 /// NOP (mov r0, r0).
-bool ARMMachineInstructionRaiser::removeNeedlessInst(MachineInstr *MInst) {
-  if (MInst->getOpcode() == ARM::MOVr && MInst->getNumOperands() >= 2 &&
-      MInst->getOperand(0).isReg() && MInst->getOperand(1).isReg() &&
-      MInst->getOperand(0).getReg() == MInst->getOperand(1).getReg()) {
+bool ARMMachineInstructionRaiser::removeNeedlessInst(MachineInstr *MI) {
+  if (MI->getOpcode() == ARM::MOVr && MI->getNumOperands() >= 2 &&
+      MI->getOperand(0).isReg() && MI->getOperand(1).isReg() &&
+      MI->getOperand(0).getReg() == MI->getOperand(1).getReg()) {
     return true;
   }
 
@@ -534,20 +534,20 @@ bool ARMMachineInstructionRaiser::removeNeedlessInst(MachineInstr *MInst) {
 }
 
 /// The entry function of this class.
-bool ARMMachineInstructionRaiser::reviseMI(MachineInstr &MInst) {
-  decodeModImmOperand(MInst);
+bool ARMMachineInstructionRaiser::reviseMI(MachineInstr &MI) {
+  decodeModImmOperand(MI);
   // Relocate BL target in same section.
-  if (MInst.getOpcode() == ARM::BL || MInst.getOpcode() == ARM::BL_pred ||
-      MInst.getOpcode() == ARM::Bcc) {
-    MachineOperand &MO0 = MInst.getOperand(0);
+  if (MI.getOpcode() == ARM::BL || MI.getOpcode() == ARM::BL_pred ||
+      MI.getOpcode() == ARM::Bcc) {
+    MachineOperand &MO0 = MI.getOperand(0);
     if (MO0.isImm())
-      relocateBranch(MInst);
+      relocateBranch(MI);
   }
 
-  if (MInst.getOpcode() == ARM::LDRi12 || MInst.getOpcode() == ARM::STRi12) {
-    if (MInst.getNumOperands() >= 2 && MInst.getOperand(1).isReg() &&
-        MInst.getOperand(1).getReg() == ARM::PC) {
-      addressPCRelativeData(MInst);
+  if (MI.getOpcode() == ARM::LDRi12 || MI.getOpcode() == ARM::STRi12) {
+    if (MI.getNumOperands() >= 2 && MI.getOperand(1).isReg() &&
+        MI.getOperand(1).getReg() == ARM::PC) {
+      addressPCRelativeData(MI);
     }
   }
 

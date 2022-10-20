@@ -158,17 +158,17 @@ Type *ARMMachineInstructionRaiser::genReturnType() {
   return RetTy;
 }
 
-Function *ARMMachineInstructionRaiser::discoverPrototype(MachineFunction &MachFunc) {
+Function *ARMMachineInstructionRaiser::discoverPrototype() {
   LLVM_DEBUG(dbgs() << "ARMFunctionPrototype start.\n");
 
-  Function &Fn = const_cast<Function &>(MachFunc.getFunction());
+  Function &Fn = const_cast<Function &>(MF.getFunction());
 
   std::vector<Type *> ParamTys;
   genParameterTypes(ParamTys);
   Type *RetTy = genReturnType();
   FunctionType *FnTy = FunctionType::get(RetTy, ParamTys, false);
 
-  MachineModuleInfo &Mmi = MachFunc.getMMI();
+  MachineModuleInfo &Mmi = MF.getMMI();
   Module *Mdl = const_cast<Module *>(Mmi.getModule());
   Mdl->getFunctionList().remove(&Fn);
   Function *Pnfn =

@@ -202,7 +202,7 @@ int64_t ARMMachineInstructionRaiser::identifyStackOp(const MachineInstr &MI) {
 }
 
 /// Find out all of frame relative operands, and update them.
-void ARMMachineInstructionRaiser::searchStackObjects(MachineFunction &MF) {
+void ARMMachineInstructionRaiser::searchStackObjects() {
   // <SPOffset, frame_element_ptr>
   std::map<int64_t, StackElement *, std::greater<int64_t>> SPOffElementMap;
   DenseMap<MachineInstr *, StackElement *> InstrToElementMap;
@@ -277,7 +277,7 @@ void ARMMachineInstructionRaiser::searchStackObjects(MachineFunction &MF) {
 bool ARMMachineInstructionRaiser::buildFrame() {
   LLVM_DEBUG(dbgs() << "ARMFrameBuilder start.\n");
 
-  searchStackObjects(MF);
+  searchStackObjects();
 
   // For debugging.
   LLVM_DEBUG(MF.dump());

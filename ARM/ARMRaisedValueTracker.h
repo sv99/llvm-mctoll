@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file contains the declaration of FunctionRaisingInfo class for use
+// This file contains the declaration of ARMRaisedValueTracker class for use
 // by llvm-mctoll.
 //
 //===----------------------------------------------------------------------===//
@@ -35,26 +35,20 @@ typedef struct {
   BasicBlock *IfBB;
   /// Else basic block for conditional instruction.
   BasicBlock *ElseBB;
-} NodePropertyInfo;
+} ARMMachineInstr;
 
 /// This contains information that is global to a function that is used when
 /// raising a region of the function.
-class FunctionRaisingInfo {
+class ARMRaisedValueTracker {
 public:
-  /// Initialize this FunctionRaisingInfo with the given Function and its
-  /// associated MachineFunction.
-  void set(ARMMachineInstructionRaiser &TheMIR);
+  ARMRaisedValueTracker() = delete;
+  ARMRaisedValueTracker(ARMMachineInstructionRaiser &TheMIR);
 
   /// Function return IR value mapping with its parent BasicBlock, it is used
   /// to create exit BasicBlock.
   DenseMap<BasicBlock *, Value *> RetValMap;
   /// NZCV flags Alloca mapping.
   DenseMap<unsigned, Value *> AllocaMap;
-
-  /// Clear out all the function-specific state. This returns this
-  /// FunctionRaisingInfo to an empty state, ready to be used for a
-  /// different function.
-  void clear();
 
   /// Get the corresponding BasicBlock of given MachineBasicBlock. If does not
   /// give a MachineBasicBlock, it will create a new BasicBlock on current
@@ -70,23 +64,23 @@ public:
   /// Check the index is stack slot index or not.
   bool isStackIndex(int FrameIndex);
 
-  NodePropertyInfo *getNPI(const MachineInstr &MI) {
-    return NPMap[&MI];
+  ARMMachineInstr *getAMI(const MachineInstr &MI) {
+    return AMIMap[&MI];
   }
   /// Analyzes CPSR register information of MI to collect conditional
   /// code properties.
-  NodePropertyInfo * initNPI(const MachineInstr &MI);
+  ARMMachineInstr * initMachineInstr(const MachineInstr &MI);
 
-  /// Record the destination Value for NPI.
-  void recordDefinition(NodePropertyInfo *NPI, Value *Val);
+  /// Record the destination Value for AMI.
+  void recordDefinition(ARMMachineInstr *AMI, Value *Val);
   /// Record the register in which the value is stored.
   void recordDefinition(Register Reg, Value *Val);
 
   /// Get IR value for the MI operand.
   Value *getOperand(const MachineInstr &MI, unsigned Num);
-  /// Get IR value for the NPI operand corrected by NPI->IsTwoAddress.
+  /// Get IR value for the AMI operand corrected by AMI->IsTwoAddress.
   /// Internally call getOperand for MI.
-  Value *getOperand(NodePropertyInfo *NPI, unsigned Num);
+  Value *getOperand(ARMMachineInstr *AMI, unsigned Num);
 
   Value *getRegValue(Register Reg) { return RegVMap[Reg]; }
   bool checkRegValue(Register Reg) { return RegVMap.count(Reg) > 0; }
@@ -99,10 +93,10 @@ private:
   /// The map of the physical register with related IR value. It is used to
   /// convert physical registers to SSA form IR Values.
   DenseMap<Register, Value *> RegVMap;
-  /// The map of the NodePropertyInfo for related MI.
-  DenseMap<const MachineInstr *, NodePropertyInfo *> NPMap;
+  /// The map of the ARMMachineInstr for related MI.
+  DenseMap<const MachineInstr *, ARMMachineInstr *> AMIMap;
   /// The map for the NodePropertyInfo with related IR value (last).
-  DenseMap<NodePropertyInfo *, Value *> NPVMap;
+  DenseMap<ARMMachineInstr *, Value *> AMIVMap;
 };
 
 } // end namespace mctoll
