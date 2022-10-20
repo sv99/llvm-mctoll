@@ -558,16 +558,13 @@ bool ARMMachineInstructionRaiser::revise() {
   bool Res = false;
 
   vector<MachineInstr *> RMVec;
-  for (MachineFunction::iterator MBBIter = MF.begin(), MBBEnd = MF.end();
-       MBBIter != MBBEnd; ++MBBIter) {
-    for (MachineBasicBlock::iterator MIIter = MBBIter->begin(),
-                                     MIEnd = MBBIter->end();
-         MIIter != MIEnd; ++MIIter) {
-      if (removeNeedlessInst(&*MIIter)) {
-        RMVec.push_back(&*MIIter);
+  for (MachineBasicBlock &MBB : MF) {
+    for (MachineInstr &MI : MBB.instrs()) {
+      if (removeNeedlessInst(&MI)) {
+        RMVec.push_back(&MI);
         Res = true;
       } else
-        Res = reviseMI(*MIIter);
+        Res = reviseMI(MI);
     }
   }
 

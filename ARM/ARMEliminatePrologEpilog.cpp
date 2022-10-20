@@ -25,9 +25,7 @@ using namespace llvm::mctoll;
 /// number, otherwise false.
 bool ARMMachineInstructionRaiser::checkRegister(
     unsigned Reg, std::vector<MachineInstr *> &Instrs) const {
-  std::vector<MachineInstr *>::iterator Iter = Instrs.begin();
-  for (; Iter < Instrs.end(); ++Iter) {
-    MachineInstr *MI = *Iter;
+  for (MachineInstr *MI : Instrs) {
     if (MI->mayStore()) {
       for (unsigned Idx = 0; Idx < MI->getNumOperands(); Idx++) {
         MachineOperand MO = MI->getOperand(Idx);
@@ -203,9 +201,6 @@ bool ARMMachineInstructionRaiser::eliminateEpilog() {
   for (MachineBasicBlock &MBB : MF) {
     std::vector<MachineInstr *> EpilogInstrs;
     // MBBIter may be invalidated by the raising operation.
-    // for (MachineBasicBlock::iterator MBBIter = MBB.begin();
-    //     MBBIter != MBB.end(); MBBIter++) {
-    //  MachineInstr &MI = (*MBBIter);
     for (MachineInstr &MI : MBB.instrs()) {
       // Push the LOAD instruction
       if (MI.mayLoad()) {

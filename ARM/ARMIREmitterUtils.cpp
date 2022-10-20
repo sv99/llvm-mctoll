@@ -704,17 +704,16 @@ void ARMMachineInstructionRaiser::emitSwitchInstr(
 
     // condition instruction
     Instruction *CondInst = nullptr;
-    for (BasicBlock::iterator DI = CondBB->begin(); DI != CondBB->end(); DI++) {
-      Instruction *Ins = dyn_cast<Instruction>(DI);
-      if (isa<LoadInst>(DI) && !CondInst) {
-        CondInst = Ins;
+    for (Instruction &Ins : CondBB->getInstList()) {
+      if (isa<LoadInst>(Ins) && !CondInst) {
+        CondInst = &Ins;
       }
 
-      if (CondInst && (Ins->getOpcode() == Instruction::Sub)) {
-        if (isa<ConstantInt>(Ins->getOperand(1))) {
-          ConstantInt *IntOp = dyn_cast<ConstantInt>(Ins->getOperand(1));
+      if (CondInst && (Ins.getOpcode() == Instruction::Sub)) {
+        if (isa<ConstantInt>(Ins.getOperand(1))) {
+          ConstantInt *IntOp = dyn_cast<ConstantInt>(Ins.getOperand(1));
           if (IntOp->uge(0)) {
-            CondInst = Ins;
+            CondInst = &Ins;
           }
         }
       }

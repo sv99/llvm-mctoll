@@ -1103,9 +1103,7 @@ MachineInstr *ARMMachineInstructionRaiser::splitCS(MachineBasicBlock &MBB,
 bool ARMMachineInstructionRaiser::split() {
   std::vector<MachineInstr *> RemoveList;
   for (MachineBasicBlock &MBB : MF) {
-    for (MachineBasicBlock::iterator I = MBB.begin(), E = MBB.end(); I != E;
-         ++I) {
-      MachineInstr &MI = *I;
+    for (MachineInstr &MI : MBB) {
       MachineInstr *RemoveMI = nullptr;
 
       unsigned Opcode, NewOpc;

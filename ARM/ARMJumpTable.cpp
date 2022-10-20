@@ -106,9 +106,7 @@ bool ARMMachineInstructionRaiser::raiseMachineJumpTable() {
 
   // Save the ADDri and Calculate the start address of data.
   for (MachineBasicBlock &JmpTblBaseCalcMBB : MF) {
-    for (MachineBasicBlock::iterator CurMBBIter = JmpTblBaseCalcMBB.begin();
-         CurMBBIter != JmpTblBaseCalcMBB.end(); CurMBBIter++) {
-      MachineInstr &JmpTblOffsetCalcMI = *CurMBBIter;
+    for (MachineInstr &JmpTblOffsetCalcMI : JmpTblBaseCalcMBB) {
       // Find the MI: %r0 = ADDri %pc, #8
       // add     r0, pc, #8
       // ldr     r1, [sp]
@@ -120,7 +118,7 @@ bool ARMMachineInstructionRaiser::raiseMachineJumpTable() {
         // If the fourth instruction in swith block is "add pc, rm, rn",
         // this library should be built with "-fPIC".
         bool IsFPIC = false;
-        MachineBasicBlock::iterator FourthInstr = CurMBBIter;
+        MachineBasicBlock::iterator FourthInstr = JmpTblOffsetCalcMI;
         std::advance(FourthInstr, 3);
         if (FourthInstr != JmpTblBaseCalcMBB.end()) {
           MachineInstr &JGPC = *FourthInstr;
