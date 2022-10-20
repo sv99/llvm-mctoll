@@ -37,6 +37,16 @@ bool ARMRaisedValueTracker::isStackIndex(int FrameIndex) {
   return (unsigned)FrameIndex > MIR->getRaisedFunction()->arg_size();
 }
 
+BasicBlock *
+ARMRaisedValueTracker::createBasicBlock(ARMMachineInstr *AMI) {
+  auto *MBB = AMI->MI->getParent();
+  Function *Fn = MIR->getRaisedFunction();
+  BasicBlock *Block = BasicBlock::Create(Fn->getContext(), "", Fn);
+  MBBMap.insert(std::make_pair(Block,
+                               const_cast<MachineBasicBlock *>(MBB)));
+  return Block;
+}
+
 /// Get the corresponding BasicBlock of given MachineBasicBlock.
 /// If does not give a MachineBasicBlock, it will create a new BasicBlock
 /// on current Function, and returns it.

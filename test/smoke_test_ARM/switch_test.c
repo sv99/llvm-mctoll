@@ -3,10 +3,10 @@
 // Assertion failed: (NPMap[Node] != nullptr && "Cannot find the corresponding node property!"), function getRealValue, file DAGRaisingInfo.cpp, line 25.
 // UNSUPPORTED: true
 // REQUIRES: system-linux || system-darwin
-// RUN: clang %cparams -o %t %s
+// RUN: clang %cparams -c -o %t %S/Inputs/switch_func.c
 // RUN: llvm-mctoll -d %mparams -I %S/test-inc.h %t
-// RUN: clang %cparams -o %t1 %t-dis.ll
-// RUN: %run-elf %t1 2>&1 | FileCheck %s
+// RUN: clang -o %t1 %t-dis.ll %s
+// RUN: %t1 2>&1 | FileCheck %s
 // CHECK: Switch 1
 // CHECK-NEXT: Return 15
 // CHECK-NEXT: Switch 2
@@ -29,31 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// extern int switch_test(int);
-int switch_test(int n) {
-
-  switch (n) {
-  case 4:
-    n = n + 10;
-    break;
-  case 5:
-    n = n + 11;
-    break;
-  case 6:
-    n = n + 12;
-    break;
-  case 9:
-    n = n + 13;
-    break;
-  case 1:
-    n = n + 14;
-    break;
-  default:
-    n = n + 15;
-  }
-
-  return n;
-}
+extern int switch_test(int);
 
 int main(int argc, char** argv) {
   int n = 0;

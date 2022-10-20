@@ -1,6 +1,8 @@
-// RUN: clang %c-target -o %t %s -O2
-// RUN: llvm-mctoll -d %m-target -I %S/test-inc.h %t
-// RUN: clang %c-target -o %t1 %t-dis.ll
+// UNSUPPORTED: true
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s -O2
+// RUN: llvm-mctoll -d %mparams -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t1 %t-dis.ll
 // RUN: %run-elf %t1 2>&1 | FileCheck %s
 // CHECK: 0 0 0 0 0 0 0 0 0 0
 

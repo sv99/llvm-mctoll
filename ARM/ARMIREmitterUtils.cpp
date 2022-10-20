@@ -28,7 +28,7 @@ static const std::vector<StringRef> CPSR({"N_Flag", "Z_Flag", "C_Flag",
 /// Create PHINode for value use selection when running.
 PHINode *ARMMachineInstructionRaiser::createAndEmitPHINode(
     IRBuilder<> &IRB, ARMMachineInstr *AMI,
-    BasicBlock *IfBB, BasicBlock *ElseBB, Instruction *IfInst) {
+    BasicBlock *IfBB, BasicBlock *ElseBB, Value *IfInst) {
   PHINode *Phi = PHINode::Create(getDefaultType(), 2, "", ElseBB);
 
   auto *BB = IRB.GetInsertBlock();
@@ -497,15 +497,13 @@ static uint64_t getMCInstIndex(const MachineInstr &MI) {
 
 void ARMMachineInstructionRaiser::checkConditionBegin(
     IRBuilder<> &IRB, ARMMachineInstr *AMI) {
-
-  auto *BB = IRB.GetInsertBlock();
   // Check condition pattern ADC<c> <Rdn>,<Rm>
   if (AMI->HasCPSR && AMI->IsCond) {
     // Condition pattern ADC<c> <Rdn>,<Rm>
     // Create new BB for EQ instruction execute.
-    AMI->IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    AMI->IfBB = RaisedValues->createBasicBlock(AMI);
     // Create new BB to update the DAG BB.
-    AMI->ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    AMI->ElseBB = RaisedValues->createBasicBlock(AMI);
     // Emit the condition code.
     emitCondCode(IRB, AMI->IfBB, AMI->ElseBB, AMI->Cond);
     IRB.SetInsertPoint(AMI->IfBB);
@@ -524,8 +522,7 @@ Value *ARMMachineInstructionRaiser::checkConditionEnd(
     // If exists condition block then emit Phi node
     if (AMI->IsCond) {
       // ADC<c> <Rdn>,<Rm>
-      Result = createAndEmitPHINode(IRB, AMI, AMI->IfBB, AMI->ElseBB,
-                                    dyn_cast<Instruction>(Result));
+      Result = createAndEmitPHINode(IRB, AMI, AMI->IfBB, AMI->ElseBB, Result);
       IRB.CreateBr(AMI->ElseBB);
       IRB.SetInsertPoint(AMI->ElseBB);
     }
@@ -567,9 +564,9 @@ Value *ARMMachineInstructionRaiser::emitLoad(
 
   if (AMI->HasCPSR) {
     // Create new BB for EQ instruction execute.
-    BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
     // Create new BB to update the DAG BB.
-    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
     // Emit the condition code.
     emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
@@ -582,8 +579,7 @@ Value *ARMMachineInstructionRaiser::emitLoad(
           BB, getDefaultType(), Ptr,
           MaybeAlign(Log2(DLT->getPointerPrefAlignment())));
 
-    Result = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
-                                  dyn_cast<Instruction>(Inst));
+    Result = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);
     IRB.CreateBr(ElseBB);
     IRB.SetInsertPoint(ElseBB);
   } else {
@@ -621,7 +617,6 @@ Value *ARMMachineInstructionRaiser::emitLoad(
 void ARMMachineInstructionRaiser::emitStore(
     IRBuilder<> &IRB, ARMMachineInstr *AMI) {
   auto &MI = *AMI->MI;
-  auto *BB = IRB.GetInsertBlock();
   auto *DLT = &getDataLayout();
   IRB.SetCurrentDebugLocation(MI.getDebugLoc());
 
@@ -646,9 +641,9 @@ void ARMMachineInstructionRaiser::emitStore(
 
   if (AMI->HasCPSR) {
     // Create new BB for EQ instruction execute.
-    BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
     // Create new BB to update the DAG BB.
-    BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+    BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
     // Emit the condition code.
     emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);

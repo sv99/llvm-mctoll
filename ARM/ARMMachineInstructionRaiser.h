@@ -264,7 +264,7 @@ private:
   /// Create PHINode for value use selection when running.
   PHINode *createAndEmitPHINode(IRBuilder<> &IRB, ARMMachineInstr *AMI,
                                 BasicBlock *IfBB, BasicBlock *ElseBB,
-                                Instruction *IfInst);
+                                Value *IfInst);
 
   PointerType *getPointerType() {
     return Type::getIntNPtrTy(Ctx, MF.getDataLayout().getPointerSizeInBits());

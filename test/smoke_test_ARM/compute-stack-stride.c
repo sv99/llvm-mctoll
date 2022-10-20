@@ -1,18 +1,20 @@
 // Assertion failed: (castIsValid(op, S, Ty) && "Invalid cast!"), function Create, file Instructions.cpp, line 3155.
-// RUN: clang %c-target -o %t %s
-// RUN: llvm-mctoll -d %m-target -I %S/test-inc.h %t
-// RUN: clang %c-target -o %t1 %t-dis.ll
+// UNSUPPORTED: true
+// REQUIRES: system-linux || system-darwin
+// RUN: clang %cparams -o %t %s
+// RUN: llvm-mctoll -d %mparams -I %S/test-inc.h %t
+// RUN: clang %cparams -o %t1 %t-dis.ll
 // RUN: %run-elf %t1 2>&1 | FileCheck %s
 
 //  clang -o %t-opt %s -O2 -mno-sse
 //  llvm-mctoll -d --include-files="/usr/include/stdio.h,/usr/include/stdlib.h,/usr/include/string.h" %t-opt
 //  clang -o %t-opt-dis %t-opt-dis.ll
 //  %t-opt-dis 2>&1 | FileCheck %s
-//CHECK:arr3[1] = -127
-//CHECK:arr3[2] = -126
-//CHECK:arr3[3] = -125
-//CHECK:arr3[4] = -124
-//CHECK:arr3[0] = -128, arr3[1] = -127, arr3[2] = -126, arr3[3] = -125, arr3[4] = -124
+// CHECK: arr3[1] = -127
+// CHECK: arr3[2] = -126
+// CHECK: arr3[3] = -125
+// CHECK: arr3[4] = -124
+// CHECK: arr3[0] = -128, arr3[1] = -127, arr3[2] = -126, arr3[3] = -125, arr3[4] = -124
 
 #include <stdio.h>
 #include <limits.h>

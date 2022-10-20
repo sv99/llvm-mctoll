@@ -54,6 +54,7 @@ public:
   /// give a MachineBasicBlock, it will create a new BasicBlock on current
   /// Function, and returns it.
   BasicBlock *getOrCreateBasicBlock(MachineBasicBlock *MBB = nullptr);
+  BasicBlock *createBasicBlock(ARMMachineInstr *AMI);
   MachineBasicBlock *getMBB(BasicBlock *BB) { return MBBMap[BB]; }
 
   /// Check the stack slot index is represented return element or not.

@@ -22,15 +22,14 @@ using namespace llvm;
 using namespace llvm::mctoll;
 
 #define HANDLE_EMIT_CONDCODE_COMMON(OPC)                                       \
-  BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());             \
-  BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());           \
+  BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);             \
+  BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);           \
                                                                                \
   emitCondCode(IRB, IfBB, ElseBB, CondValue);                                   \
                                                                                \
   Value *Inst = BinaryOperator::Create##OPC(S0, S1);                           \
   IfBB->getInstList().push_back(dyn_cast<Instruction>(Inst));                  \
-  PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,                    \
-                                      dyn_cast<Instruction>(Inst));            \
+  PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);           \
   RaisedValues->recordDefinition(AMI, Phi);
 
 #define HANDLE_EMIT_CONDCODE(OPC)                                              \
@@ -526,9 +525,9 @@ void ARMMachineInstructionRaiser::emitInstr(
         emitSpecialCPSR(IRB, Inst, 0);
       } else {
         // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
         // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
         // Emit the condition code.
         emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
@@ -537,8 +536,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         Value *InstLShr = IRB.CreateLShr(S0, S1);
         Value *InstShl = IRB.CreateShl(S0, InstSub);
         Value *Inst = IRB.CreateOr(InstLShr, InstShl);
-        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);
         RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -574,9 +572,9 @@ void ARMMachineInstructionRaiser::emitInstr(
         saveCFlag(IRB, CFlag);
       } else {
         // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
         // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
         // Emit the condition code.
         emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
@@ -588,8 +586,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         CFlag = IRB.CreateZExt(CFlag, Ty);
         Value *Bit31 = IRB.CreateShl(CFlag, Val2);
         Value *Inst = IRB.CreateAdd(InstLShr, Bit31);
-        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);
         RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -688,8 +685,8 @@ void ARMMachineInstructionRaiser::emitInstr(
         else
           emitCPSR(IRB, S1, InstNot, 1);
       } else {
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
+        BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
         emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
 
@@ -699,8 +696,7 @@ void ARMMachineInstructionRaiser::emitInstr(
         CFlag = loadCFlag(IRB);
         Value *CZext = IRB.CreateZExt(CFlag, Ty);
         Value *Inst = IRB.CreateAdd(InstSub, CZext);
-        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);
         RaisedValues->recordDefinition(AMI, Phi);
         IRB.CreateBr(ElseBB);
         IRB.SetInsertPoint(ElseBB);
@@ -727,9 +723,9 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     if (AMI->HasCPSR) {
       // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+      BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
       // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+      BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
       // TODO:
       // This instruction not change def, consider phi later.
@@ -763,9 +759,9 @@ void ARMMachineInstructionRaiser::emitInstr(
 
     if (AMI->HasCPSR) {
       // Create new BB for EQ instruction execute.
-      BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+      BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
       // Create new BB to update the DAG BB.
-      BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+      BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
 
       // TODO:
       // Not change def. Consider how to use PHI.
@@ -815,16 +811,15 @@ void ARMMachineInstructionRaiser::emitInstr(
         // unchanged.
       } else {
         // Create new BB for EQ instruction execute.
-        BasicBlock *IfBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *IfBB = RaisedValues->createBasicBlock(AMI);
         // Create new BB to update the DAG BB.
-        BasicBlock *ElseBB = BasicBlock::Create(Ctx, "", BB->getParent());
+        BasicBlock *ElseBB = RaisedValues->createBasicBlock(AMI);
         // Emit the condition code.
         emitCondCode(IRB, IfBB, ElseBB, AMI->Cond);
         IRB.SetInsertPoint(IfBB);
         Value *InstXor = IRB.CreateXor(Val, S1);
         Value *Inst = IRB.CreateAnd(S0, InstXor);
-        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB,
-                                            dyn_cast<Instruction>(Inst));
+        PHINode *Phi = createAndEmitPHINode(IRB, AMI, IfBB, ElseBB, Inst);
         RaisedValues->recordDefinition(AMI, Phi);
 
         IRB.CreateBr(ElseBB);
