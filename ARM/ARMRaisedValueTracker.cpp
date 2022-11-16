@@ -23,7 +23,7 @@ using namespace llvm;
 using namespace llvm::mctoll;
 
 ARMRaisedValueTracker::ARMRaisedValueTracker(
-    ARMMachineInstructionRaiser &TheMIR) : MIR(&TheMIR) {}
+    ARMMachineInstructionRaiser *TheMIR) : MIR(TheMIR) {}
 
 /// Check the stack slot index is represented argument or not.
 bool ARMRaisedValueTracker::isArgumentIndex(int FrameIndex) {

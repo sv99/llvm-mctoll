@@ -475,7 +475,7 @@ void ARMMachineInstructionRaiser::addressPCRelativeData(MachineInstr &MI) {
   MachineInstr *NInst = MI.getNextNode();
   // To match the pattern: OPCODE Rx, [PC, Rd], Rd must be the def of previous
   // instruction.
-  if (NInst->getNumOperands() >= 2 && NInst->getOperand(1).isReg() &&
+  if (NInst && NInst->getNumOperands() >= 2 && NInst->getOperand(1).isReg() &&
       NInst->getOperand(1).getReg() == ARM::PC &&
       NInst->getOperand(2).isReg() &&
       NInst->getOperand(2).getReg() == MI.getOperand(0).getReg()) {

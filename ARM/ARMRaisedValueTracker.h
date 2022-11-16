@@ -42,7 +42,7 @@ typedef struct {
 class ARMRaisedValueTracker {
 public:
   ARMRaisedValueTracker() = delete;
-  ARMRaisedValueTracker(ARMMachineInstructionRaiser &TheMIR);
+  ARMRaisedValueTracker(ARMMachineInstructionRaiser *TheMIR);
 
   /// Function return IR value mapping with its parent BasicBlock, it is used
   /// to create exit BasicBlock.

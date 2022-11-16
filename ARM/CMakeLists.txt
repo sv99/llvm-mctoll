@@ -11,15 +11,14 @@ endif()
 
 add_llvm_library(mctollARMRaiser
   ARMModuleRaiser.cpp
-  ARMFunctionPrototype.cpp
+  ARMFuncPrototypeDiscovery.cpp
   ARMMIRevising.cpp
   ARMEliminatePrologEpilog.cpp
-    ARMJumpTable.cpp
+  ARMJumpTable.cpp
   ARMArgumentRaiser.cpp
   ARMFrameBuilder.cpp
   ARMInstructionSplitting.cpp
   ARMRaisedValueTracker.cpp
-  ARMSelectionDAGISel.cpp
   ARMMachineInstructionRaiser.cpp
   ARMIREmitter.cpp
   ARMIREmitterUtils.cpp

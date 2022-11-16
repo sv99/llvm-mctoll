@@ -35,6 +35,17 @@ class ARMRaisedValueTracker;
 // MachineBasicBlock and corresponding raised BasicBlock
 using MBBNumToBBMap = std::map<unsigned int, BasicBlock *>;
 
+// Tuple of <PhysReg, DefiningMBBNo, Alloca>
+// When promoting reaching definitions there may be situations where the
+// predecessor block that defines a reaching definition may not yet have
+// been raised. This tuple represents the Alloca slot to which
+// the value of PhysReg defined in DefiningMBB should be stored once it is
+// raised.
+using PhysRegMBBValTuple = std::tuple<unsigned int, unsigned int, Value *>;
+
+// MCPhysReg set
+using MCPhysRegSet = std::set<MCPhysReg>;
+
 class ARMMachineInstructionRaiser : public MachineInstructionRaiser {
 public:
   ARMMachineInstructionRaiser() = delete;
@@ -58,6 +69,24 @@ public:
         Ctx, getDataLayout().getPointerSizeInBits());
   };
 private:
+  /// The function raising state storage.
+  ARMRaisedValueTracker *RaisedValues;
+
+  // Set of reaching definitions that were not promoted during since defining
+  // block is not yet raised and need to be promoted upon raising all blocks.
+  std::set<PhysRegMBBValTuple> ReachingDefsToPromote;
+
+  // A map of MBB number to known defined registers.
+  std::map<int, std::set<Register>> PerMBBDefinedRegs;
+
+  // A map of MachineFunctionBlock number to BasicBlock *
+  MBBNumToBBMap MbbToBBMap;
+
+  // Since MachineFrameInfo does not represent stack object ordering, we
+  // maintain a shadow stack indexed and sorted by descending order of stack
+  // offset of objects allocated on the stack.
+  std::map<int64_t, int> ShadowStackIndexedByOffset;
+
   // Commonly used LLVM data structures during this phase
   MachineRegisterInfo &MachineRegInfo;
   const ARMSubtarget &TargetInfo;
@@ -65,14 +94,7 @@ private:
   const ARMBaseRegisterInfo *RegisterInfo;
   ARMModuleRaiser *TargetMR;
   LLVMContext &Ctx;
-  /// The function raising state storage.
-  ARMRaisedValueTracker *RaisedValues;
 
-  // A map of MachineFunctionBlock number to BasicBlock *
-  MBBNumToBBMap MbbToBBMap;
-
-  /// Discover machine function prototype.
-  Function *discoverPrototype();
   /// Check the first reference of the reg in the MBB is USE.
   bool isUsedRegister(unsigned Reg, const MachineBasicBlock &MBB);
   /// Check the last reference of the reg in the MBB is DEF.
@@ -82,6 +104,18 @@ private:
   /// Get return type of current MachineFunction.
   Type *genReturnType();
 
+  // Find function prototype
+
+  Type *getFunctionReturnType();
+  Type *getReachingReturnType(const MachineBasicBlock &MBB);
+  Type *getReturnTypeFromMBB(const MachineBasicBlock &MBB, bool &HasCall);
+  /// Add Reg to LiveInSet. This function adds the actual register Reg - not its
+  /// 64-bit super register variant because we'll need the actual register to
+  /// determine the argument type.
+  void addRegisterToFunctionLiveInSet(MCPhysRegSet &CurLiveSet, unsigned Reg);
+  Function *getCalledFunction(const MachineInstr &MI);
+
+   // Revise process with intermediate SelectionDAG representation.
   // 1 step: Revise MI
   bool revise();
   bool reviseMI(MachineInstr &MI);
@@ -188,7 +222,6 @@ private:
                                   bool IsDef = false);
 
   // step 7: select instruction (without intermediate SelectionDAG state)
-  bool doSelection();
   void initEntryBasicBlock();
   void selectBasicBlock(MachineBasicBlock *MBB);
 

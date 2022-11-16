@@ -240,7 +240,7 @@ void ARMMachineInstructionRaiser::searchStackObjects() {
     MI->removeFromParent();
 
   // TODO: Before generating StackObjects, we need to check whether there is
-  // any missed StackElement.
+  //       any missed StackElement.
 
   BasicBlock *EntryBB = &getRaisedFunction()->getEntryBlock();
 
